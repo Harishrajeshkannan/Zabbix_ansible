@@ -9,7 +9,6 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "server:admin": "powershell -ExecutionPolicy Bypass -File start-server-admin.ps1",
     "dev:full": "concurrently \"npm run dev\" \"npm run server\""
   },
   "dependencies": {

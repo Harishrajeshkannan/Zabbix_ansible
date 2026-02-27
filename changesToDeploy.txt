@@ -1,0 +1,6 @@
+#in .env:
+VITE_BACKEND_API_URL=http://localhost:3001/api to-- /zabbix/zabbixagentinstallation/api
+
+#did not push zabbixConfig.js to repo
+
+#zabbix.png image path issue in fetching
