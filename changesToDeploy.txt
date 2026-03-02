@@ -4,3 +4,6 @@ VITE_BACKEND_API_URL=http://localhost:3001/api to-- /zabbix/zabbixagentinstallat
 #did not push zabbixConfig.js to repo
 
 #zabbix.png image path issue in fetching
+
+
+#add base url in vite.config.js
