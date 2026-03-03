@@ -223,9 +223,10 @@ app.get('/api/agent-versions', async (req, res) => {
     
     console.log(`Detected RHEL version: ${rhelVersion}`);
     
-    // Fetch available versions from Zabbix repository
-    const majorVersions = ['7.0', '6.4', '6.0', '5.0'];
+    // Fetch available versions from Zabbix repository - include all major versions
+    const majorVersions = ['7.8', '7.6', '7.4', '7.2', '7.0', '6.4', '6.0', '5.0'];
     const allVersions = [];
+    let usedFallback = false;
     
     for (const majorVersion of majorVersions) {
       try {
@@ -235,21 +236,26 @@ app.get('/api/agent-versions', async (req, res) => {
         if (result.success && result.stdout.trim()) {
           const versions = result.stdout.trim().split('\n').filter(v => v.match(/^\d+\.\d+\.\d+$/));
           allVersions.push(...versions);
+          console.log(`Found ${versions.length} versions for ${majorVersion}`);
         }
       } catch (error) {
         console.log(`Could not fetch versions for ${majorVersion}: ${error.message}`);
       }
     }
     
-    // If curl method fails, provide known stable versions
+    // If curl method fails, provide known stable versions (updated March 2026)
     if (allVersions.length === 0) {
-      console.log('Using fallback version list');
+      usedFallback = true;
+      console.log('⚠️  Scraping failed - Using fallback version list');
       allVersions.push(
-        '7.0.5', '7.0.4', '7.0.3', '7.0.2', '7.0.1', '7.0.0',
-        '6.4.18', '6.4.17', '6.4.16', '6.4.15', '6.4.14',
-        '6.0.33', '6.0.32', '6.0.31', '6.0.30',
-        '5.0.44', '5.0.43', '5.0.42'
+        '7.6.0', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.0',
+        '7.2.0', '7.0.6', '7.0.5', '7.0.4',
+        '6.4.18', '6.4.17', '6.4.16', '6.4.15',
+        '6.0.35', '6.0.34', '6.0.33', '6.0.32',
+        '5.0.45', '5.0.44', '5.0.43'
       );
+    } else {
+      console.log(`✓ Successfully scraped ${allVersions.length} versions from Zabbix repos`);
     }
     
     // Remove duplicates and sort
@@ -264,13 +270,15 @@ app.get('/api/agent-versions', async (req, res) => {
     }).slice(0, 30);
     
     console.log(`Returning ${sortedVersions.length} available versions for RHEL ${rhelVersion}`);
+    console.log(`Latest version: ${sortedVersions[0]}`);
     
     res.json({
       success: true,
       versions: sortedVersions,
       count: sortedVersions.length,
-      source: 'zabbix-rhel-repo',
-      rhelVersion: rhelVersion
+      source: usedFallback ? 'fallback' : 'zabbix-rhel-repo-scraped',
+      rhelVersion: rhelVersion,
+      latest: sortedVersions[0]
     });
     
   } catch (error) {
@@ -282,6 +290,131 @@ app.get('/api/agent-versions', async (req, res) => {
       details: error.message,
       versions: [],
       count: 0
+    });
+  }
+});
+
+/**
+ * Download Zabbix agent RPM package for RHEL
+ */
+app.get('/api/download-agent/:version', async (req, res) => {
+  try {
+    const { version } = req.params;
+    
+    console.log(`\n[DOWNLOAD] Requested version: ${version}`);
+    
+    // Validate version format
+    if (!version.match(/^\d+\.\d+\.\d+$/)) {
+      return res.status(400).json({ 
+        error: 'Invalid version format',
+        details: 'Version must be in format X.Y.Z (e.g., 7.0.5)'
+      });
+    }
+    
+    // Get RHEL version
+    const rhelResult = await executeShellCommand('rpm -E %{rhel} 2>/dev/null || echo "8"');
+    const rhelVersion = rhelResult.stdout.trim() || '8';
+    
+    console.log(`[DOWNLOAD] RHEL version: ${rhelVersion}`);
+    
+    // Determine major version (e.g., 7.0 from 7.0.5)
+    const majorVersion = version.split('.').slice(0, 2).join('.');
+    
+    // Create download directory if it doesn't exist
+    const downloadDir = path.join(__dirname, 'downloads');
+    await executeShellCommand(`mkdir -p "${downloadDir}"`);
+    
+    // Construct repository URL and package name
+    const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/rhel/${rhelVersion}/x86_64/`;
+    
+    console.log(`[DOWNLOAD] Checking repository: ${repoUrl}`);
+    
+    // Search for the package in the repository
+    const searchCmd = `curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-${version}-[^"]+\\.el${rhelVersion}\\.x86_64\\.rpm' | head -1`;
+    const searchResult = await executeShellCommand(searchCmd);
+    
+    if (!searchResult.success || !searchResult.stdout.trim()) {
+      console.log(`[DOWNLOAD] ✗ Package not found in repository`);
+      return res.status(404).json({
+        error: 'Package not found',
+        details: `Zabbix Agent ${version} not found in RHEL ${rhelVersion} repository. Verify the version exists.`,
+        repoUrl: repoUrl
+      });
+    }
+    
+    const packageName = searchResult.stdout.trim();
+    const packageUrl = `${repoUrl}${packageName}`;
+    const downloadPath = path.join(downloadDir, packageName);
+    
+    console.log(`[DOWNLOAD] Package: ${packageName}`);
+    console.log(`[DOWNLOAD] URL: ${packageUrl}`);
+    
+    // Check if already downloaded
+    const checkExisting = await executeShellCommand(`test -f "${downloadPath}" && echo "exists" || echo "not_found"`);
+    
+    if (checkExisting.stdout.trim() === 'exists') {
+      console.log(`[DOWNLOAD] ✓ Package already downloaded`);
+      
+      // Get file size
+      const statResult = await executeShellCommand(`stat -c%s "${downloadPath}" 2>/dev/null || stat -f%z "${downloadPath}"`);
+      const fileSize = parseInt(statResult.stdout.trim()) || 0;
+      
+      return res.json({
+        success: true,
+        message: 'Package already downloaded',
+        path: downloadPath,
+        packageName: packageName,
+        size: fileSize,
+        cached: true
+      });
+    }
+    
+    // Download the package
+    console.log(`[DOWNLOAD] Downloading package...`);
+    
+    const downloadCmd = `curl -f -L --progress-bar "${packageUrl}" -o "${downloadPath}"`;
+    const downloadResult = await executeShellCommand(downloadCmd, { timeout: 300000 }); // 5 minutes
+    
+    if (!downloadResult.success) {
+      console.log(`[DOWNLOAD] ✗ Download failed`);
+      return res.status(500).json({
+        error: 'Download failed',
+        details: downloadResult.stderr || 'Failed to download package from repository',
+        packageUrl: packageUrl
+      });
+    }
+    
+    // Verify download
+    const verifyResult = await executeShellCommand(`test -f "${downloadPath}" && stat -c%s "${downloadPath}" 2>/dev/null || stat -f%z "${downloadPath}"`);
+    
+    if (!verifyResult.success) {
+      console.log(`[DOWNLOAD] ✗ Downloaded file verification failed`);
+      return res.status(500).json({
+        error: 'Download verification failed',
+        details: 'File downloaded but could not be verified'
+      });
+    }
+    
+    const fileSize = parseInt(verifyResult.stdout.trim()) || 0;
+    
+    console.log(`[DOWNLOAD] ✓ Downloaded successfully (${(fileSize / 1024 / 1024).toFixed(2)} MB)\n`);
+    
+    res.json({
+      success: true,
+      message: `Zabbix Agent ${version} RPM package downloaded successfully`,
+      path: downloadPath,
+      packageName: packageName,
+      size: fileSize,
+      cached: false,
+      repoUrl: packageUrl
+    });
+    
+  } catch (error) {
+    console.error(`[DOWNLOAD] ✗ Exception: ${error.message}\n`);
+    
+    res.status(500).json({
+      error: 'Download failed',
+      details: error.message
     });
   }
 });
@@ -315,7 +448,7 @@ app.post('/api/install-localhost', async (req, res) => {
     console.log(`[INSTALL] Sudo User: ${sudoUser}\n`);
     
     // Get the path to the installation script
-    const scriptPath = path.join(__dirname, 'run-install.sh');
+    const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
     
     // Make sure script is executable
     await executeShellCommand(`chmod +x "${scriptPath}"`);
@@ -327,40 +460,25 @@ app.post('/api/install-localhost', async (req, res) => {
     // Create a temporary expect script to handle sudo password
     const expectScript = `/tmp/install_expect_${Date.now()}.exp`;
     const expectContent = `#!/usr/bin/expect -f
-set timeout 300
-set version [lindex $argv 0]
-set server_ip [lindex $argv 1]
-set hostname [lindex $argv 2]
-set server_port [lindex $argv 3]
-set psk [lindex $argv 4]
-set psk_identity [lindex $argv 5]
-set sudo_password [lindex $argv 6]
-set script_path [lindex $argv 7]
-
-spawn bash $script_path $version $server_ip $hostname $server_port $psk $psk_identity
+set timeout 600
+spawn sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}" "${pskParam}" "${pskIdentityParam}"
 expect {
-    "password for*:" {
-        send "$sudo_password\\r"
-        exp_continue
-    }
-    "\\[sudo\\] password for*:" {
-        send "$sudo_password\\r"
-        exp_continue
-    }
-    "Proceed with installation?*" {
-        send "Y\\r"
+    "*password*:" {
+        send "${sudoPassword}\\r"
         exp_continue
     }
     eof
 }
+catch wait result
+exit [lindex \\$result 3]
 `;
     
     await fs.writeFile(expectScript, expectContent, { mode: 0o755 });
     
-    console.log(`[INSTALL] Starting installation with expect script...`);
+    console.log(`[INSTALL] Executing installation script with sudo...`);
     
     // Execute installation using expect to handle password prompts
-    const installCommand = `expect "${expectScript}" "${version}" "${serverIP}" "${hostname}" "${serverPort}" "${pskParam}" "${pskIdentityParam}" "${sudoPassword}" "${scriptPath}"`;
+    const installCommand = `expect "${expectScript}"`;
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     
@@ -480,9 +598,12 @@ app.post('/api/cleanup-temp', async (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
+  
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`🐧 Platform: RHEL-based Linux`);  
   console.log(`📁 Logs directory: ${LOGS_DIR}`);
+  console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
   console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
   console.log(`🔐 Requirements: Sudo user with password for installations`);
   console.log();

@@ -10,8 +10,8 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     usePSK: false,
     psk: '',
     pskIdentity: '',
-    adminUsername: '',
-    adminPassword: ''
+    sudoUser: '',
+    sudoPassword: ''
   });
   const [installing, setInstalling] = useState(false);
 
@@ -43,7 +43,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Install Zabbix Agent on Localhost</h2>
+          <h2>Install Zabbix Agent on Local RHEL Server</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         
@@ -103,32 +103,32 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           </div>
 
           <div className="form-section-header">
-            <strong>Admin Credentials (Required for Installation)</strong>
+            <strong>Sudo Credentials (Required for Installation)</strong>
           </div>
 
           <div className="form-group">
-            <label htmlFor="adminUsername">Admin Username *</label>
+            <label htmlFor="sudoUser">Sudo User *</label>
             <input
               type="text"
-              id="adminUsername"
-              name="adminUsername"
-              value={formData.adminUsername}
+              id="sudoUser"
+              name="sudoUser"
+              value={formData.sudoUser}
               onChange={handleChange}
-              placeholder="DOMAIN\\username or .\\username"
+              placeholder="username"
               required
             />
-            <small>Use .\\username for local admin or DOMAIN\\username for domain admin</small>
+            <small>User account with sudo privileges on this RHEL server</small>
           </div>
 
           <div className="form-group">
-            <label htmlFor="adminPassword">Admin Password *</label>
+            <label htmlFor="sudoPassword">Sudo Password *</label>
             <input
               type="password"
-              id="adminPassword"
-              name="adminPassword"
-              value={formData.adminPassword}
+              id="sudoPassword"
+              name="sudoPassword"
+              value={formData.sudoPassword}
               onChange={handleChange}
-              placeholder="Enter admin password"
+              placeholder="Enter sudo password"
               required
               autoComplete="off"
             />
@@ -176,13 +176,13 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           )}
 
           <div className="form-info">
-            <strong>Installation Location:</strong> C:\ZabbixInstall
-            <br />
-            <strong>Installation will:</strong>
+            <strong>Installation Process:</strong>
             <ul>
-              <li>Download the agent to C:\ZabbixInstall</li>
-              <li>Install Zabbix Agent 2 service</li>
-              <li>Configure and start the service</li>
+              <li>Install Zabbix repository for RHEL</li>
+              <li>Install zabbix-agent2 package via YUM/DNF</li>
+              <li>Configure Zabbix Server connection</li>
+              <li>Enable and start zabbix-agent2 service</li>
+              <li>Configure firewall if needed</li>
             </ul>
           </div>
 

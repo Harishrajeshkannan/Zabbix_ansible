@@ -5,33 +5,6 @@
 const API_BASE = 'http://localhost:3001/api';
 
 /**
- * Simple semver comparison function
- * Returns 1 if v1 > v2, -1 if v1 < v2, 0 if equal
- */
-const compareSemver = (v1, v2) => {
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
-  
-  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-    const p1 = parts1[i] || 0;
-    const p2 = parts2[i] || 0;
-    
-    if (p1 > p2) return 1;
-    if (p1 < p2) return -1;
-  }
-  
-  return 0;
-};
-
-/**
- * Check if a tag is a valid semver (e.g., 7.0.5)
- */
-const isValidSemver = (tag) => {
-  const semverRegex = /^\d+\.\d+\.\d+$/;
-  return semverRegex.test(tag);
-};
-
-/**
  * Fetch available Zabbix agent versions from RHEL repositories
  */
 export const getLatestAgentVersion = async () => {
@@ -45,19 +18,20 @@ export const getLatestAgentVersion = async () => {
       throw new Error(data.details || data.error || 'Failed to fetch versions');
     }
 
-    if (!Array.isArray(data.versions) || data.versions.length === 0) {
-      throw new Error('No versions available');
+    if (!data.latest) {
+      throw new Error('No latest version available in response');
     }
 
-    // Return the latest (first) version
-    const latestVersion = data.versions[0];
-    console.log('Latest Zabbix Agent version for RHEL:', latestVersion);
+    // Return the latest version from scraped or fallback data
+    const latestVersion = data.latest;
+    const source = data.source || 'unknown';
+    console.log(`Latest Zabbix Agent version for RHEL: ${latestVersion} (source: ${source})`);
     return latestVersion;
     
   } catch (error) {
     console.error('Failed to fetch version from RHEL repos, using fallback:', error);
-    // Return fallback version if fetch fails
-    return '7.0.5';
+    // Return fallback version if fetch fails (latest stable as of March 2026)
+    return '7.6.0';
   }
 };
 
@@ -81,14 +55,15 @@ export const getAvailableVersions = async () => {
   } catch (error) {
     console.error('Error fetching versions:', error);
     
-    // Return fallback versions for RHEL if fetch fails
+    // Return fallback versions for RHEL if fetch fails (updated for March 2026)
     const fallbackData = {
       success: false,
       versions: [
-        '7.0.5', '7.0.4', '7.0.3', '7.0.2', '7.0.1', '7.0.0',
-        '6.4.18', '6.4.17', '6.4.16', '6.4.15', '6.4.14',
-        '6.0.33', '6.0.32', '6.0.31', '6.0.30',
-        '5.0.44', '5.0.43', '5.0.42'
+        '7.6.0', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.0',
+        '7.2.0', '7.0.6', '7.0.5', '7.0.4',
+        '6.4.18', '6.4.17', '6.4.16', '6.4.15',
+        '6.0.35', '6.0.34', '6.0.33', '6.0.32',
+        '5.0.45', '5.0.44', '5.0.43'
       ],
       count: 19,
       source: 'fallback-rhel',
@@ -105,7 +80,7 @@ export const getAvailableVersions = async () => {
  */
 export const getVersionRecommendations = (versions) => {
   if (!Array.isArray(versions) || versions.length === 0) {
-    return { latest: '7.0.5', stable: '7.0.5', lts: '6.0.33' };
+    return { latest: '7.6.0', stable: '7.6.0', lts: '6.0.35' };
   }
 
   const recommendations = {
@@ -126,7 +101,7 @@ export const getVersionRecommendations = (versions) => {
     const parts = version.split('.');
     return (
       (parts[2] === '0' && parseInt(parts[0]) >= 5) || // Major releases
-      ['6.0.33', '5.0.44', '7.0.5'].includes(version) // Known stable versions
+      ['6.0.35', '6.0.34', '6.0.33', '5.0.45', '5.0.44'].includes(version) // Known LTS versions
     );
   });
   

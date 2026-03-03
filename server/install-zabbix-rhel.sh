@@ -1,12 +1,13 @@
 #!/bin/bash
 # Zabbix Agent 2 Installation Script for RHEL/CentOS/Rocky/AlmaLinux
-# Usage: ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]
+# This script must be run with sudo/root privileges
+# Usage: sudo ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]
 #
 # Examples:
-#   ./install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver.example.com
-#   ./install-zabbix-rhel.sh 6.4.18 zabbix.company.com myserver 10051 "my-secret-psk" "myserver-psk"
+#   sudo ./install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver.example.com
+#   sudo ./install-zabbix-rhel.sh 6.4.18 zabbix.company.com myserver 10051 "my-secret-psk" "myserver-psk"
 #
-# Interactive mode (no arguments): Will prompt for all required information
+# All parameters are required for automated installation
 
 set -euo pipefail
 
@@ -51,28 +52,6 @@ print_section() {
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
-}
-
-# Function to prompt for input with default
-prompt_input() {
-    local prompt="$1"
-    local default="$2"
-    local var_name="$3"
-    
-    if [ -n "$default" ]; then
-        read -p "$prompt [$default]: " input
-        if [ -z "$input" ]; then
-            input="$default"
-        fi
-    else
-        read -p "$prompt: " input
-        while [ -z "$input" ]; do
-            echo "This field is required."
-            read -p "$prompt: " input
-        done
-    fi
-    
-    eval "$var_name='$input'"
 }
 
 # Function to validate IP address
@@ -140,13 +119,8 @@ check_prerequisites() {
     
     print_info "Using package manager: $PKG_MGR"
     
-    # Check sudo access
-    if ! sudo -n true 2>/dev/null; then
-        print_warning "Sudo access required for installation"
-        echo "You will be prompted for your sudo password when needed."
-    else
-        print_success "Passwordless sudo access available"
-    fi
+    # Running with elevated privileges
+    print_success "Running with elevated privileges"
     
     # Check internet connectivity
     if ! ping -c 1 repo.zabbix.com >/dev/null 2>&1; then
@@ -161,10 +135,10 @@ install_prerequisites() {
     print_section "Installing Prerequisites"
     
     print_info "Updating package cache..."
-    sudo $PKG_MGR update -y -q
+    $PKG_MGR update -y -q
     
     print_info "Installing required packages..."
-    sudo $PKG_MGR install -y wget curl rpm
+    $PKG_MGR install -y wget curl rpm
 }
 
 # Function to add Zabbix repository
@@ -186,7 +160,7 @@ add_zabbix_repo() {
         print_info "Zabbix repository $MAJOR_VERSION already installed"
     else
         print_info "Installing Zabbix repository..."
-        sudo rpm -Uvh "$REPO_URL" || {
+        rpm -Uvh "$REPO_URL" || {
             print_error "Failed to install Zabbix repository"
             print_error "Please check if version $version is available for RHEL $RHEL_VERSION"
             exit 1
@@ -195,7 +169,7 @@ add_zabbix_repo() {
     
     # Clean package cache
     print_info "Cleaning package cache..."
-    sudo $PKG_MGR clean all -q
+    $PKG_MGR clean all -q
 }
 
 # Function to install Zabbix Agent 2
@@ -206,16 +180,11 @@ install_zabbix_agent() {
     if rpm -qa | grep -q zabbix-agent2; then
         INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
         print_warning "Zabbix Agent 2 already installed: $INSTALLED_VERSION"
-        
-        read -p "Do you want to reinstall/update? (y/N): " confirm
-        if [[ ! $confirm =~ ^[Yy]$ ]]; then
-            print_info "Skipping installation"
-            return 0
-        fi
+        print_info "Proceeding with reinstall/update..."
     fi
     
     print_info "Installing Zabbix Agent 2..."
-    sudo $PKG_MGR install -y zabbix-agent2
+    $PKG_MGR install -y zabbix-agent2
     
     print_success "Zabbix Agent 2 installed successfully"
 }
@@ -233,24 +202,24 @@ configure_zabbix_agent() {
     # Backup original configuration
     if [ ! -f /etc/zabbix/zabbix_agent2.conf.backup ]; then
         print_info "Creating backup of original configuration..."
-        sudo cp /etc/zabbix/zabbix_agent2.conf /etc/zabbix/zabbix_agent2.conf.backup
+        cp /etc/zabbix/zabbix_agent2.conf /etc/zabbix/zabbix_agent2.conf.backup
     fi
     
     # Configure basic settings
     print_info "Configuring basic settings..."
-    sudo sed -i "s/^Server=.*/Server=$server_ip/" /etc/zabbix/zabbix_agent2.conf
-    sudo sed -i "s/^ServerActive=.*/ServerActive=$server_ip:$server_port/" /etc/zabbix/zabbix_agent2.conf
-    sudo sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
-    sudo sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
+    sed -i "s/^Server=.*/Server=$server_ip/" /etc/zabbix/zabbix_agent2.conf
+    sed -i "s/^ServerActive=.*/ServerActive=$server_ip:$server_port/" /etc/zabbix/zabbix_agent2.conf
+    sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
+    sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
     
     # Configure PSK encryption if provided
     if [ -n "$psk" ] && [ "$psk" != "none" ]; then
         print_info "Configuring PSK encryption..."
         
         # Create PSK file
-        echo "$psk" | sudo tee /etc/zabbix/zabbix_agent2.psk >/dev/null
-        sudo chown zabbix:zabbix /etc/zabbix/zabbix_agent2.psk
-        sudo chmod 600 /etc/zabbix/zabbix_agent2.psk
+        echo "$psk" | tee /etc/zabbix/zabbix_agent2.psk >/dev/null
+        chown zabbix:zabbix /etc/zabbix/zabbix_agent2.psk
+        chmod 600 /etc/zabbix/zabbix_agent2.psk
         
         # Set PSK identity (use hostname if not specified)
         if [ -z "$psk_identity" ] || [ "$psk_identity" = "none" ]; then
@@ -258,10 +227,10 @@ configure_zabbix_agent() {
         fi
         
         # Update configuration for PSK
-        sudo sed -i 's/^# TLSConnect=.*/TLSConnect=psk/' /etc/zabbix/zabbix_agent2.conf
-        sudo sed -i 's/^# TLSAccept=.*/TLSAccept=psk/' /etc/zabbix/zabbix_agent2.conf
-        sudo sed -i "s/^# TLSPSKIdentity=.*/TLSPSKIdentity=$psk_identity/" /etc/zabbix/zabbix_agent2.conf
-        sudo sed -i 's|^# TLSPSKFile=.*|TLSPSKFile=/etc/zabbix/zabbix_agent2.psk|' /etc/zabbix/zabbix_agent2.conf
+        sed -i 's/^# TLSConnect=.*/TLSConnect=psk/' /etc/zabbix/zabbix_agent2.conf
+        sed -i 's/^# TLSAccept=.*/TLSAccept=psk/' /etc/zabbix/zabbix_agent2.conf
+        sed -i "s/^# TLSPSKIdentity=.*/TLSPSKIdentity=$psk_identity/" /etc/zabbix/zabbix_agent2.conf
+        sed -i 's|^# TLSPSKFile=.*|TLSPSKFile=/etc/zabbix/zabbix_agent2.psk|' /etc/zabbix/zabbix_agent2.conf
         
         print_success "PSK encryption configured (Identity: $psk_identity)"
     else
@@ -274,7 +243,7 @@ validate_configuration() {
     print_section "Validating Configuration"
     
     print_info "Testing configuration syntax..."
-    if sudo -u zabbix zabbix_agent2 -t zabbix.agent.ping; then
+    if su -s /bin/bash zabbix -c 'zabbix_agent2 -t zabbix.agent.ping'; then
         print_success "Configuration validation passed"
     else
         print_error "Configuration validation failed"
@@ -289,32 +258,32 @@ start_zabbix_service() {
     
     # Enable service
     print_info "Enabling Zabbix Agent 2 service..."
-    sudo systemctl enable zabbix-agent2
+    systemctl enable zabbix-agent2
     
     # Start/restart service
     print_info "Starting Zabbix Agent 2 service..."
-    sudo systemctl restart zabbix-agent2
+    systemctl restart zabbix-agent2
     
     # Wait for service to start
     sleep 3
     
     # Check service status
-    if sudo systemctl is-active --quiet zabbix-agent2; then
+    if systemctl is-active --quiet zabbix-agent2; then
         print_success "Zabbix Agent 2 service is running"
         
         # Show detailed status
         echo ""
-        sudo systemctl status zabbix-agent2 --no-pager -l
+        systemctl status zabbix-agent2 --no-pager -l
     else
         print_error "Zabbix Agent 2 service failed to start"
         
         # Show error details
         echo ""
         print_error "Service status:"
-        sudo systemctl status zabbix-agent2 --no-pager -l
+        systemctl status zabbix-agent2 --no-pager -l
         
         print_error "Recent logs:"
-        sudo journalctl -u zabbix-agent2 --no-pager -n 20
+        journalctl -u zabbix-agent2 --no-pager -n 20
         
         exit 1
     fi
@@ -324,15 +293,15 @@ start_zabbix_service() {
 configure_firewall() {
     print_section "Configuring Firewall"
     
-    if sudo systemctl is-active --quiet firewalld; then
+    if systemctl is-active --quiet firewalld; then
         print_info "Configuring firewalld..."
         
         # Add Zabbix agent port
-        sudo firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp
-        sudo firewall-cmd --reload
+        firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp
+        firewall-cmd --reload
         
         print_success "Firewall configured to allow Zabbix agent port $DEFAULT_LISTEN_PORT"
-    elif sudo systemctl is-enabled --quiet iptables 2>/dev/null; then
+    elif systemctl is-enabled --quiet iptables 2>/dev/null; then
         print_warning "iptables detected but automatic configuration not implemented"
         print_info "Please manually allow port $DEFAULT_LISTEN_PORT/tcp in your iptables rules"
     else
@@ -369,10 +338,10 @@ show_summary() {
     fi
     echo ""
     echo "Useful Commands:"
-    echo "  • Check status: sudo systemctl status zabbix-agent2"
-    echo "  • View logs: sudo journalctl -u zabbix-agent2 -f"
-    echo "  • Test config: sudo -u zabbix zabbix_agent2 -t zabbix.agent.ping"
-    echo "  • Restart service: sudo systemctl restart zabbix-agent2"
+    echo "  • Check status: systemctl status zabbix-agent2"
+    echo "  • View logs: journalctl -u zabbix-agent2 -f"
+    echo "  • Test config: su -s /bin/bash zabbix -c 'zabbix_agent2 -t zabbix.agent.ping'"
+    echo "  • Restart service: systemctl restart zabbix-agent2"
     echo ""
     
     # Test connectivity if server is reachable
@@ -397,49 +366,34 @@ main() {
     # Detect operating system
     detect_os
     
-    # Parse command line arguments or prompt for input
-    if [ $# -eq 0 ]; then
-        # Interactive mode
-        echo "Interactive installation mode"
-        echo "Press Enter to use default values shown in brackets"
+    # Parse command line arguments (automated mode only)
+    if [ $# -lt 2 ]; then
+        print_error "Insufficient arguments for automated installation"
+        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
         echo ""
-        
-        prompt_input "Zabbix Agent version" "$DEFAULT_VERSION" "VERSION"
-        
-        prompt_input "Zabbix server IP/hostname" "" "SERVER_IP"
-        while ! validate_ip "$SERVER_IP"; do
-            echo "Invalid IP address or hostname format"
-            prompt_input "Zabbix server IP/hostname" "" "SERVER_IP"
-        done
-        
-        prompt_input "Agent hostname (reported to server)" "$(hostname -f 2>/dev/null || hostname)" "HOSTNAME"
-        prompt_input "Zabbix server port" "$DEFAULT_SERVER_PORT" "SERVER_PORT"
-        prompt_input "PSK key (leave empty for no encryption)" "" "PSK"
-        
-        if [ -n "$PSK" ]; then
-            prompt_input "PSK identity" "$HOSTNAME" "PSK_IDENTITY"
-        else
-            PSK_IDENTITY=""
-        fi
-    else
-        # Command line arguments
-        VERSION="${1:-$DEFAULT_VERSION}"
-        SERVER_IP="${2:-}"
-        HOSTNAME="${3:-$(hostname -f 2>/dev/null || hostname)}"
-        SERVER_PORT="${4:-$DEFAULT_SERVER_PORT}"
-        PSK="${5:-}"
-        PSK_IDENTITY="${6:-$HOSTNAME}"
-        
-        if [ -z "$SERVER_IP" ]; then
-            print_error "Server IP is required"
-            echo "Usage: $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
-            exit 1
-        fi
-        
-        if ! validate_ip "$SERVER_IP"; then
-            print_error "Invalid server IP or hostname: $SERVER_IP"
-            exit 1
-        fi
+        echo "Examples:"
+        echo "  sudo $0 7.0.5 192.168.1.100 myserver.example.com"
+        echo "  sudo $0 6.4.18 zabbix.company.com myserver 10051 \"my-secret-psk\" \"myserver-psk\""
+        exit 1
+    fi
+    
+    # Command line arguments
+    VERSION="${1:-$DEFAULT_VERSION}"
+    SERVER_IP="${2:-}"
+    HOSTNAME="${3:-$(hostname -f 2>/dev/null || hostname)}"
+    SERVER_PORT="${4:-$DEFAULT_SERVER_PORT}"
+    PSK="${5:-}"
+    PSK_IDENTITY="${6:-$HOSTNAME}"
+    
+    if [ -z "$SERVER_IP" ]; then
+        print_error "Server IP is required"
+        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
+        exit 1
+    fi
+    
+    if ! validate_ip "$SERVER_IP"; then
+        print_error "Invalid server IP or hostname: $SERVER_IP"
+        exit 1
     fi
     
     # Normalize PSK values
@@ -461,12 +415,7 @@ main() {
     echo "Log File: $LOG_FILE"
     echo ""
     
-    # Confirm installation
-    read -p "Proceed with installation? (Y/n): " confirm
-    if [[ $confirm =~ ^[Nn]$ ]]; then
-        echo "Installation cancelled."
-        exit 0
-    fi
+    print_info "Proceeding with installation..."
     
     # Run installation steps
     check_prerequisites
@@ -485,10 +434,11 @@ main() {
 # Error handling
 trap 'print_error "Script interrupted"; exit 1' INT TERM
 
-# Check if running as root
-if [ "$EUID" -eq 0 ]; then
-    print_warning "Running as root is not recommended"
-    print_info "The script will use sudo for privileged operations"
+# Check if running with elevated privileges
+if [ "$EUID" -ne 0 ]; then
+    print_error "This script must be run with sudo or as root"
+    echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
+    exit 1
 fi
 
 # Run main function

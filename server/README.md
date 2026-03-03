@@ -1,16 +1,16 @@
-# Backend Server for Agent Action Logging
+# Backend Server for Zabbix Agent Deployment (RHEL)
 
-This backend server handles logging install/update actions to files using PowerShell commands.
+This backend server handles Zabbix Agent installation, version management, and action logging for RHEL-based systems.
 
 ## Setup
 
 1. Install dependencies:
-```powershell
+```bash
 npm install
 ```
 
 2. Start the backend server:
-```powershell
+```bash
 npm run server
 ```
 
@@ -19,7 +19,7 @@ The server will run on `http://localhost:3001`
 ## Running Both Frontend and Backend
 
 To run both frontend and backend simultaneously:
-```powershell
+```bash
 npm run dev:full
 ```
 

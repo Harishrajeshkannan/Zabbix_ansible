@@ -182,12 +182,12 @@ function App() {
   };
 
   const handleLocalInstall = async (installData) => {
-    const toastId = toast.loading('Installing Zabbix Agent on localhost...');
+    const toastId = toast.loading('Installing Zabbix Agent on local RHEL server...');
     
     try {
       await installLocalhostAgent(installData);
       
-      toast.success('Zabbix Agent installed successfully on localhost!', { id: toastId });
+      toast.success('Zabbix Agent installed successfully on RHEL server!', { id: toastId });
       
       // Reload data to reflect the installation
       setTimeout(() => {

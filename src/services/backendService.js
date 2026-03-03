@@ -139,7 +139,7 @@ export const installLocalhostAgent = async (installData) => {
   } catch (error) {
     console.error('Failed to install on localhost:', error);
     if (error.name === 'AbortError') {
-      throw new Error('Installation timeout - The installation is taking too long. Please check if the server has administrator privileges.');
+      throw new Error('Installation timeout - The installation is taking too long. Please check sudo credentials and network connectivity.');
     }
     throw error;
   }
