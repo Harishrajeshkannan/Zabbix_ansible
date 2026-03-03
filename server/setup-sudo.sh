@@ -54,13 +54,8 @@ echo "$SUDOERS_CONTENT"
 echo "---"
 echo ""
 
-read -p "Proceed with configuration? (y/N): " confirm
-if [[ ! $confirm =~ ^[Yy]$ ]]; then
-    echo "Cancelled."
-    exit 0
-fi
-
-# Write sudoers file (requires sudo)
+# Write sudoers file (requires sudo) - automated, no confirmation
+echo "Proceeding with automated configuration..."
 echo "$SUDOERS_CONTENT" | sudo tee "$SUDOERS_FILE" >/dev/null
 
 # Set correct permissions

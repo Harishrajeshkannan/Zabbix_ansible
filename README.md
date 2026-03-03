@@ -25,12 +25,12 @@ This portal provides a simple web interface to install and manage Zabbix Agent 2
 - RHEL-based operating system (RHEL, CentOS, Rocky, AlmaLinux)
 - Node.js 16+ and npm
 - Internet connectivity for package downloads
-- Sudo user with password for installations
+- Passwordless sudo configured for installation script
 
 ### System Dependencies
-- `bash` shell
-- `expect` (for password automation)
+- `bash` shell  
 - Network connectivity to Zabbix repositories
+- Configure passwordless sudo (see [server/SECURITY_SETUP.md](server/SECURITY_SETUP.md))
 
 ## Quick Start
 
@@ -102,29 +102,31 @@ Zabbix-Deployment-Portal/
 ├── src/                    # React frontend
 ├── server/                 # Node.js backend
 │   ├── index.js           # Main server file
-│   ├── install-zabbix-rhel.sh # Installation script
-│   └── run-install.sh     # Script runner
+│   ├── install-zabbix-rhel.sh # RHEL installation script
+│   ├── setup-sudo.sh      # Passwordless sudo setup
+│   └── SECURITY_SETUP.md  # Security configuration guide
 ├── agent-logs/            # Installation logs
 ├── package.json
 └── README.md
 ```
 
-## Platform Migration
+## Platform Architecture
 
-This application has been migrated from Windows PowerShell-based installation to RHEL-based repository installation. The new approach:
+This application is built for **RHEL-based Linux systems**:
 
 - ✅ **Native RHEL Support**: Uses yum/dnf package managers
 - ✅ **Repository-based**: Official Zabbix repositories
-- ✅ **Better Security**: No MSI downloads, signed packages
-- ✅ **Easier Maintenance**: Standard Linux package management
+- ✅ **Secure Installation**: Signed packages from trusted sources
+- ✅ **Standard Package Management**: Integrates with RHEL ecosystem
+- ✅ **Passwordless Sudo**: Industry-standard automation pattern
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Permission Denied**
-   - Ensure user has sudo privileges
-   - Check sudo password is correct
+1. **Passwordless Sudo Not Configured**
+   - Run: `cd server && ./setup-sudo.sh`
+   - See: PASSWORDLESS_SUDO_QUICKSTART.md
 
 2. **Repository Not Found**
    - Verify RHEL version compatibility

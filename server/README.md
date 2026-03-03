@@ -48,7 +48,7 @@ Create a log file for install/update action
   "success": true,
   "message": "Installed successfully",
   "logFile": "server1_install_2025-12-16T10-30-00.txt",
-  "fullPath": "C:\\path\\to\\agent-logs\\server1_install_2025-12-16T10-30-00.txt"
+  "fullPath": "/path/to/agent-logs/server1_install_2025-12-16T10-30-00.txt"
 }
 ```
 

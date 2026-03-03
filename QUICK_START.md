@@ -38,11 +38,17 @@ npm install
 
 ### 3. Install System Dependencies
 ```bash
-# Install expect (needed for password automation)
-sudo yum install -y expect || sudo dnf install -y expect
-
 # Ensure curl and wget are available
 sudo yum install -y curl wget || sudo dnf install -y curl wget
+```
+
+### 4. Configure Passwordless Sudo
+```bash
+# Run the automated setup script
+cd server
+sudo bash setup-sudo.sh
+
+# Or see server/SECURITY_SETUP.md for manual configuration
 ```
 
 ## Running the Application
@@ -130,19 +136,16 @@ chmod +x install-zabbix-rhel.sh
 
 ### Common Issues
 
-#### "Permission denied" errors
+#### "Permission denied" when installing agent
 ```bash
-# Check sudo access
-sudo -l
+# Verify passwordless sudo is configured
+sudo -l | grep install-zabbix-rhel.sh
 
-# Verify user is in sudo group
-groups $USER
-```
+# Should show: NOPASSWD: /path/to/install-zabbix-rhel.sh
 
-#### "Command not found: expect"
-```bash
-# Install expect
-sudo yum install -y expect || sudo dnf install -y expect
+# If not configured, run setup:
+cd server
+sudo bash setup-sudo.sh
 ```
 
 #### Frontend not loading

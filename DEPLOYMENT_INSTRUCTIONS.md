@@ -42,7 +42,7 @@ curl -sL https://rpm.nodesource.com/setup_18.x | sudo bash -
 sudo yum install -y nodejs || sudo dnf install -y nodejs
 
 # Install system dependencies
-sudo yum install -y expect curl wget git || sudo dnf install -y expect curl wget git
+sudo yum install -y curl wget git || sudo dnf install -y curl wget git
 ```
 
 ### 2. Deploy Application
@@ -72,16 +72,22 @@ The portal now uses a native RHEL installation approach:
 
 ## Authentication
 
-Instead of Windows admin credentials, the system now requires:
-- **Sudo User**: Linux username with sudo privileges
-- **Sudo Password**: Password for the sudo user
+The system uses **passwordless sudo** configuration (industry-standard DevOps approach):
+
+- **No Password Required**: Backend user configured in `/etc/sudoers.d/`
+- **Path-Restricted**: Sudo only allowed for specific installation script
+- **Audit Logging**: All actions logged to `/var/log/secure`
+
+See [server/SECURITY_SETUP.md](server/SECURITY_SETUP.md) for complete setup instructions.
 
 ## Security Features
 
-- **Sudo Password Automation**: Uses `expect` to handle password prompts
-- **Temporary Scripts**: Installation scripts are cleaned up after use
+- **Passwordless Sudo**: Path-restricted sudo configuration (NOT NOPASSWD: ALL)
+- **Input Validation**: Strict regex patterns prevent command injection
+- **Direct Execution**: No temporary scripts or intermediate files
 - **Repository Verification**: Uses official Zabbix GPG-signed packages
 - **Service Isolation**: Zabbix agent runs as dedicated zabbix user
+- **No HTTP Passwords**: Zero credential transmission over network
 
 ## Manual Installation
 
@@ -175,13 +181,17 @@ sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address
 sudo firewall-cmd --reload
 ```
 
-## Migration Notes
+## Important Notes
 
-If migrating from the Windows-based version:
+### Security Configuration
 
-1. **No More MSI Files**: Uses native Linux packages
-2. **No PowerShell**: Pure bash scripts
-3. **Repository-based**: More secure and maintainable
-4. **Native Linux**: Better integration with RHEL ecosystem
+This system uses **passwordless sudo** for automation:
 
-The user interface remains the same, but the backend now uses RHEL-native installation methods.
+1. **Secure by Design**: Uses path-restricted sudo permissions
+2. **No Passwords Over Network**: Industry-standard DevOps practice
+3. **Audit Trail**: All actions logged to `/var/log/secure`
+4. **Easy Setup**: Run `cd server && ./setup-sudo.sh`
+
+**See:** `PASSWORDLESS_SUDO_QUICKSTART.md` for setup instructions
+
+The user interface provides a clean, modern experience for deploying Zabbix agents to RHEL servers using native package management.
