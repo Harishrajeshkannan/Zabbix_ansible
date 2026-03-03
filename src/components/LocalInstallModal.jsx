@@ -9,9 +9,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     hostname: 'localhost',
     usePSK: false,
     psk: '',
-    pskIdentity: '',
-    sudoUser: '',
-    sudoPassword: ''
+    pskIdentity: ''
   });
   const [installing, setInstalling] = useState(false);
 
@@ -102,38 +100,6 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
             />
           </div>
 
-          <div className="form-section-header">
-            <strong>Sudo Credentials (Required for Installation)</strong>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="sudoUser">Sudo User *</label>
-            <input
-              type="text"
-              id="sudoUser"
-              name="sudoUser"
-              value={formData.sudoUser}
-              onChange={handleChange}
-              placeholder="username"
-              required
-            />
-            <small>User account with sudo privileges on this RHEL server</small>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="sudoPassword">Sudo Password *</label>
-            <input
-              type="password"
-              id="sudoPassword"
-              name="sudoPassword"
-              value={formData.sudoPassword}
-              onChange={handleChange}
-              placeholder="Enter sudo password"
-              required
-              autoComplete="off"
-            />
-          </div>
-
           <div className="form-group checkbox-group">
             <label>
               <input
@@ -201,3 +167,9 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
 };
 
 export default LocalInstallModal;
+  <div style={{ marginTop: '10px', padding: '10px', background: '#f0f7ff', borderRadius: '4px', fontSize: '0.9em' }}>
+              <strong>⚠️ Prerequisite:</strong> Passwordless sudo must be configured on the server.
+              <br />
+              See setup instructions in server documentation.
+            </div>
+          

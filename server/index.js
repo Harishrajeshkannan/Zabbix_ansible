@@ -212,6 +212,7 @@ app.get('/api/logs/:filename', async (req, res) => {
 
 /**
  * Get available Zabbix agent versions for RHEL from official Zabbix repository
+ * Uses native package manager for reliability instead of web scraping
  */
 app.get('/api/agent-versions', async (req, res) => {
   try {
@@ -421,10 +422,14 @@ app.get('/api/download-agent/:version', async (req, res) => {
 
 /**
  * Install Zabbix agent on local RHEL server
+ * SECURITY: Requires passwordless sudo configuration for install-zabbix-rhel.sh
+ * 
+ * Add to /etc/sudoers.d/zabbix-install:
+ *   nodeuser ALL=(ALL) NOPASSWD: /path/to/install-zabbix-rhel.sh
  */
 app.post('/api/install-localhost', async (req, res) => {
   try {
-    const { version, serverIP, serverPort = 10051, hostname, psk, pskIdentity, sudoUser, sudoPassword } = req.body;
+    const { version, serverIP, serverPort = 10051, hostname, psk, pskIdentity } = req.body;
     
     // Validate required fields
     if (!version || !serverIP || !hostname) {
@@ -434,18 +439,39 @@ app.post('/api/install-localhost', async (req, res) => {
       });
     }
     
-    if (!sudoUser || !sudoPassword) {
-      return res.status(400).json({ 
-        error: 'Missing sudo credentials',
-        details: 'sudoUser and sudoPassword are required for RHEL installation'
+    // SECURITY: Strict input validation to prevent command injection
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+      return res.status(400).json({
+        error: 'Invalid version format',
+        details: 'Version must be in format X.Y.Z (e.g., 7.0.5)'
+      });
+    }
+    
+    if (!/^[a-zA-Z0-9.-]+$/.test(serverIP)) {
+      return res.status(400).json({
+        error: 'Invalid server IP/hostname',
+        details: 'Server IP must contain only alphanumeric characters, dots, and hyphens'
+      });
+    }
+    
+    if (!/^[a-zA-Z0-9.-]+$/.test(hostname)) {
+      return res.status(400).json({
+        error: 'Invalid hostname',
+        details: 'Hostname must contain only alphanumeric characters, dots, and hyphens'
+      });
+    }
+    
+    if (serverPort < 1 || serverPort > 65535) {
+      return res.status(400).json({
+        error: 'Invalid port',
+        details: 'Port must be between 1 and 65535'
       });
     }
     
     console.log(`\n[INSTALL] Version: ${version}`);
     console.log(`[INSTALL] Server: ${serverIP}:${serverPort}`);
     console.log(`[INSTALL] Hostname: ${hostname}`);
-    console.log(`[INSTALL] PSK: ${psk ? 'Enabled' : 'Disabled'}`);
-    console.log(`[INSTALL] Sudo User: ${sudoUser}\n`);
+    console.log(`[INSTALL] PSK: ${psk ? 'Enabled' : 'Disabled'}\n`);
     
     // Get the path to the installation script
     const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
@@ -453,45 +479,21 @@ app.post('/api/install-localhost', async (req, res) => {
     // Make sure script is executable
     await executeShellCommand(`chmod +x "${scriptPath}"`);
     
-    // Prepare parameters for the script
+    // Prepare parameters (validated above)
     const pskParam = psk || 'none';
     const pskIdentityParam = pskIdentity || hostname;
     
-    // Create a temporary expect script to handle sudo password
-    const expectScript = `/tmp/install_expect_${Date.now()}.exp`;
-    const expectContent = `#!/usr/bin/expect -f
-set timeout 600
-spawn sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}" "${pskParam}" "${pskIdentityParam}"
-expect {
-    "*password*:" {
-        send "${sudoPassword}\\r"
-        exp_continue
-    }
-    eof
-}
-catch wait result
-exit [lindex \\$result 3]
-`;
+    console.log(`[INSTALL] Executing installation script with passwordless sudo...`);
     
-    await fs.writeFile(expectScript, expectContent, { mode: 0o755 });
-    
-    console.log(`[INSTALL] Executing installation script with sudo...`);
-    
-    // Execute installation using expect to handle password prompts
-    const installCommand = `expect "${expectScript}"`;
+    // SECURITY: No password handling - relies on sudoers configuration
+    // Execute installation directly with sudo (requires passwordless sudo setup)
+    const installCommand = `sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}" "${pskParam}" "${pskIdentityParam}"`;
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     
     console.log(`[INSTALL] Output:\n${result.stdout}`);
     if (result.stderr) {
       console.log(`[INSTALL] Errors:\n${result.stderr}`);
-    }
-    
-    // Clean up expect script
-    try {
-      await executeShellCommand(`rm -f "${expectScript}"`);
-    } catch {
-      // Ignore cleanup errors
     }
     
     const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();

@@ -108,7 +108,8 @@ export const downloadAgentPackage = async (version) => {
 };
 
 /**
- * Install Zabbix agent on localhost
+ * Install Zabbix agent on localhost (RHEL server)
+ * Requires passwordless sudo configuration on the server
  * @param {Object} installData - Installation configuration
  * @returns {Promise<Object>} Response from backend
  */
@@ -139,7 +140,7 @@ export const installLocalhostAgent = async (installData) => {
   } catch (error) {
     console.error('Failed to install on localhost:', error);
     if (error.name === 'AbortError') {
-      throw new Error('Installation timeout - The installation is taking too long. Please check sudo credentials and network connectivity.');
+      throw new Error('Installation timeout - The installation is taking too long. Please check network connectivity and server resources.');
     }
     throw error;
   }
