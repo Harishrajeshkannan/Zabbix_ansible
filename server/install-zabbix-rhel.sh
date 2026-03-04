@@ -150,8 +150,16 @@ add_zabbix_repo() {
     # Extract major.minor version
     MAJOR_VERSION=$(echo "$version" | cut -d. -f1-2)
     
+    # Determine if /stable/ path should be used (7.2+ versions use it, earlier don't)
+    MAJOR_NUM=$(echo "$MAJOR_VERSION" | awk '{print $1}')
+    if awk "BEGIN {exit !($MAJOR_NUM >= 7.2)}"; then
+        STABLE_PATH="/stable"
+    else
+        STABLE_PATH=""
+    fi
+    
     # Build repository URL
-    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION/stable/rhel/$RHEL_VERSION/x86_64/zabbix-release-$MAJOR_VERSION-1.el$RHEL_VERSION.noarch.rpm"
+    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION${STABLE_PATH}/rhel/$RHEL_VERSION/x86_64/zabbix-release-$MAJOR_VERSION-1.el$RHEL_VERSION.noarch.rpm"
     
     print_info "Repository URL: $REPO_URL"
     

@@ -281,7 +281,10 @@ app.get('/api/agent-versions', async (req, res) => {
     
     for (const majorVersion of majorVersions) {
       try {
-        const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/stable/rhel/${rhelVersion}/x86_64/`;
+        // Versions 7.2+ use /stable/ path, older versions don't
+        const majorNum = parseFloat(majorVersion);
+        const stablePath = majorNum >= 7.2 ? '/stable' : '';
+        const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}${stablePath}/rhel/${rhelVersion}/x86_64/`;
         // Look for actual zabbix-agent2 packages, not zabbix-release
         const result = await executeShellCommand(`curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-[0-9.]+' | grep -oP '[0-9.]+' | sort -uV | head -20`);
         
@@ -371,13 +374,15 @@ app.get('/api/download-agent/:version', async (req, res) => {
     
     // Determine major version (e.g., 7.0 from 7.0.5)
     const majorVersion = version.split('.').slice(0, 2).join('.');
+    const majorNum = parseFloat(majorVersion);
     
     // Create download directory if it doesn't exist
     const downloadDir = path.join(__dirname, 'downloads');
     await executeShellCommand(`mkdir -p "${downloadDir}"`);
     
-    // Construct repository URL and package name
-    const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/stable/rhel/${rhelVersion}/x86_64/`;
+    // Construct repository URL - versions 7.2+ use /stable/ path, older versions don't
+    const stablePath = majorNum >= 7.2 ? '/stable' : '';
+    const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}${stablePath}/rhel/${rhelVersion}/x86_64/`;
     
     console.log(`[DOWNLOAD] Checking repository: ${repoUrl}`);
     
