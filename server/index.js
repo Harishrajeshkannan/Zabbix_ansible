@@ -389,7 +389,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
     // Search for the package in the repository
     // Package format: zabbix-agent2-{version}-release{N}.el{rhelVersion}.x86_64.rpm
     // Get the latest release if multiple exist (e.g., release1, release2)
-    const searchCmd = `curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-${version}-release[0-9]+\\.el${rhelVersion}\\.x86_64\\.rpm' | sort -V | tail -1`;
+    const searchCmd = `curl -s "${repoUrl}" | grep -oP "zabbix-agent2-${version}-release[0-9]+\\.el${rhelVersion}\\.x86_64\\.rpm" | sort -V | tail -1`;
     const searchResult = await executeShellCommand(searchCmd);
     
     if (!searchResult.success || !searchResult.stdout.trim()) {
