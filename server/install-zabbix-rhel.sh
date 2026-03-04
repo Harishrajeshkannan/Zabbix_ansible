@@ -151,7 +151,7 @@ add_zabbix_repo() {
     MAJOR_VERSION=$(echo "$version" | cut -d. -f1-2)
     
     # Build repository URL
-    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION/rhel/$RHEL_VERSION/x86_64/zabbix-release-$MAJOR_VERSION-1.el$RHEL_VERSION.noarch.rpm"
+    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION/stable/rhel/$RHEL_VERSION/x86_64/zabbix-release-$MAJOR_VERSION-1.el$RHEL_VERSION.noarch.rpm"
     
     print_info "Repository URL: $REPO_URL"
     

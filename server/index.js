@@ -281,7 +281,7 @@ app.get('/api/agent-versions', async (req, res) => {
     
     for (const majorVersion of majorVersions) {
       try {
-        const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/rhel/${rhelVersion}/x86_64/`;
+        const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/stable/rhel/${rhelVersion}/x86_64/`;
         const result = await executeShellCommand(`curl -s "${repoUrl}" | grep -oP 'zabbix-release-[0-9.]+-' | grep -oP '[0-9.]+' | head -20`);
         
         if (result.success && result.stdout.trim()) {
@@ -376,7 +376,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
     await executeShellCommand(`mkdir -p "${downloadDir}"`);
     
     // Construct repository URL and package name
-    const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/rhel/${rhelVersion}/x86_64/`;
+    const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/stable/rhel/${rhelVersion}/x86_64/`;
     
     console.log(`[DOWNLOAD] Checking repository: ${repoUrl}`);
     
