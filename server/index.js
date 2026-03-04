@@ -282,7 +282,8 @@ app.get('/api/agent-versions', async (req, res) => {
     for (const majorVersion of majorVersions) {
       try {
         const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}/stable/rhel/${rhelVersion}/x86_64/`;
-        const result = await executeShellCommand(`curl -s "${repoUrl}" | grep -oP 'zabbix-release-[0-9.]+-' | grep -oP '[0-9.]+' | head -20`);
+        // Look for actual zabbix-agent2 packages, not zabbix-release
+        const result = await executeShellCommand(`curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-[0-9.]+' | grep -oP '[0-9.]+' | sort -uV | head -20`);
         
         if (result.success && result.stdout.trim()) {
           const versions = result.stdout.trim().split('\n').filter(v => v.match(/^\d+\.\d+\.\d+$/));
@@ -299,7 +300,7 @@ app.get('/api/agent-versions', async (req, res) => {
       usedFallback = true;
       console.log('⚠️  Scraping failed - Using fallback version list');
       allVersions.push(
-        '7.6.0', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.0',
+        '7.4.7', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.2', '7.4.1', '7.4.0',
         '7.2.0', '7.0.6', '7.0.5', '7.0.4',
         '6.4.18', '6.4.17', '6.4.16', '6.4.15',
         '6.0.35', '6.0.34', '6.0.33', '6.0.32',
@@ -381,7 +382,9 @@ app.get('/api/download-agent/:version', async (req, res) => {
     console.log(`[DOWNLOAD] Checking repository: ${repoUrl}`);
     
     // Search for the package in the repository
-    const searchCmd = `curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-${version}-[^"]+\\.el${rhelVersion}\\.x86_64\\.rpm' | head -1`;
+    // Package format: zabbix-agent2-{version}-release{N}.el{rhelVersion}.x86_64.rpm
+    // Get the latest release if multiple exist (e.g., release1, release2)
+    const searchCmd = `curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-${version}-release[0-9]+\\.el${rhelVersion}\\.x86_64\\.rpm' | sort -V | tail -1`;
     const searchResult = await executeShellCommand(searchCmd);
     
     if (!searchResult.success || !searchResult.stdout.trim()) {

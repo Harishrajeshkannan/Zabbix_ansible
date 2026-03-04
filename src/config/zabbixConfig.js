@@ -10,7 +10,7 @@ export const ZABBIX_CONFIG = {
   apiToken: import.meta.env.VITE_ZABBIX_API_TOKEN || '',
   
   // Latest Zabbix agent version (update this manually or fetch from your deployment server)
-  latestAgentVersion: '7.4.5',
+  latestAgentVersion: '7.4.7',
 };
 
 // Validate configuration

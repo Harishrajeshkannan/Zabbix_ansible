@@ -38,8 +38,8 @@ const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentV
       }
     } catch (error) {
       console.error('Failed to fetch versions:', error);
-      // Fallback versions
-      const fallbackVersions = ['7.4.5', '7.4.4', '7.4.3', '7.4.2', '7.4.1', '7.4.0'];
+      // Fallback versions (updated March 2026)
+      const fallbackVersions = ['7.4.7', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.2', '7.4.1', '7.4.0'];
       setVersions(fallbackVersions);
       setFormData(prev => ({
         ...prev,

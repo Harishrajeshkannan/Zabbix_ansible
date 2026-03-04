@@ -31,7 +31,7 @@ export const getLatestAgentVersion = async () => {
   } catch (error) {
     console.error('Failed to fetch version from RHEL repos, using fallback:', error);
     // Return fallback version if fetch fails (latest stable as of March 2026)
-    return '7.6.0';
+    return '7.4.7';
   }
 };
 
