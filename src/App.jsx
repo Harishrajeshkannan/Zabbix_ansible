@@ -207,8 +207,13 @@ function App() {
     setVersionSelectorOpen(true);
   };
 
-  const handleVersionSelected = async (selectedVersion) => {
+  const handleVersionSelected = async (selectedVersionOrData) => {
     if (!selectedHost) return;
+    
+    // Extract version - handle both string and object formats
+    const selectedVersion = typeof selectedVersionOrData === 'string' 
+      ? selectedVersionOrData 
+      : selectedVersionOrData?.version;
     
     if (!selectedVersion) {
       toast.error('Please select a version');
