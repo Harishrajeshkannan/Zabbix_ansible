@@ -13,6 +13,56 @@ const __dirname = path.dirname(__filename);
 // ============= HELPER FUNCTIONS =============
 
 /**
+ * Check if passwordless sudo is configured for the installation script
+ */
+async function checkPasswordlessSudo() {
+  try {
+    const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
+    // Try to run sudo with -n (non-interactive) flag
+    const result = await executeShellCommand(`sudo -n "${scriptPath}" 2>&1 || true`);
+    
+    // If we get "Insufficient arguments" error, passwordless sudo is working
+    // If we get "password required", it's not configured
+    if (result.stdout.includes('Insufficient arguments') || result.stdout.includes('USAGE:')) {
+      return true; // Passwordless sudo is configured
+    }
+    return false; // Passwordless sudo not configured
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Automatically configure passwordless sudo by running setup-sudo.sh
+ */
+async function setupPasswordlessSudo() {
+  try {
+    const setupScript = path.join(__dirname, 'setup-sudo.sh');
+    console.log('🔧 Configuring passwordless sudo automatically...');
+    console.log(`   Running: ${setupScript}`);
+    
+    // Make setup script executable
+    await executeShellCommand(`chmod +x "${setupScript}"`);
+    
+    // Run setup script with sudo (user may be prompted for password once)
+    const result = await executeShellCommand(`sudo bash "${setupScript}"`, { timeout: 30000 });
+    
+    if (result.success || result.stdout.includes('Setup Complete')) {
+      console.log('✅ Passwordless sudo configured successfully\n');
+      return true;
+    } else {
+      console.error('❌ Failed to configure passwordless sudo');
+      console.error('   Output:', result.stdout);
+      console.error('   Error:', result.stderr);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error during sudo setup:', error.message);
+    return false;
+  }
+}
+
+/**
  * Execute shell command with proper error handling
  */
 async function executeShellCommand(command, options = {}) {
@@ -439,6 +489,25 @@ app.post('/api/install-localhost', async (req, res) => {
       });
     }
     
+    // Check if passwordless sudo is configured before attempting installation
+    console.log('\n[INSTALL] Checking passwordless sudo configuration...');
+    const isSudoConfigured = await checkPasswordlessSudo();
+    
+    if (!isSudoConfigured) {
+      console.log('[INSTALL] Passwordless sudo not configured. Attempting automatic setup...');
+      const setupSuccess = await setupPasswordlessSudo();
+      
+      if (!setupSuccess) {
+        return res.status(403).json({
+          error: 'Passwordless sudo not configured',
+          details: 'Installation requires passwordless sudo. Please run: sudo bash server/setup-sudo.sh'
+        });
+      }
+      console.log('[INSTALL] Passwordless sudo configured successfully');
+    } else {
+      console.log('[INSTALL] Passwordless sudo is configured ✓');
+    }
+    
     // SECURITY: Strict input validation to prevent command injection
     if (!/^\d+\.\d+\.\d+$/.test(version)) {
       return res.status(400).json({
@@ -599,7 +668,7 @@ app.post('/api/cleanup-temp', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
   
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
@@ -607,6 +676,24 @@ app.listen(PORT, () => {
   console.log(`📁 Logs directory: ${LOGS_DIR}`);
   console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
   console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
-  console.log(`🔐 Requirements: Sudo user with password for installations`);
   console.log();
+  
+  // Automatically check and configure passwordless sudo
+  console.log('🔐 Checking passwordless sudo configuration...');
+  const isSudoConfigured = await checkPasswordlessSudo();
+  
+  if (isSudoConfigured) {
+    console.log('✅ Passwordless sudo is already configured\n');
+  } else {
+    console.log('⚠️  Passwordless sudo not configured. Setting up automatically...');
+    const setupSuccess = await setupPasswordlessSudo();
+    
+    if (!setupSuccess) {
+      console.log('\n⚠️  WARNING: Passwordless sudo setup failed!');
+      console.log('   Installation may fail without proper sudo configuration.');
+      console.log('   Manually run: cd server && sudo bash setup-sudo.sh\n');
+    }
+  }
+  
+  console.log('✨ Backend ready to accept requests\n');
 });
