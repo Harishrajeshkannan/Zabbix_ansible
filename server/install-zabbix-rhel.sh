@@ -182,6 +182,8 @@ add_zabbix_repo() {
 
 # Function to install Zabbix Agent 2
 install_zabbix_agent() {
+    local version="$1"
+    
     print_section "Installing Zabbix Agent 2"
     
     # Check if already installed
@@ -191,10 +193,54 @@ install_zabbix_agent() {
         print_info "Proceeding with reinstall/update..."
     fi
     
-    print_info "Installing Zabbix Agent 2..."
-    $PKG_MGR install -y zabbix-agent2
+    print_info "Installing Zabbix Agent 2 version ${version}..."
     
-    print_success "Zabbix Agent 2 installed successfully"
+    # Check if RPM file was pre-downloaded
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    DOWNLOADS_DIR="${SCRIPT_DIR}/downloads"
+    
+    # Look for downloaded RPM matching the version
+    DOWNLOADED_RPM=""
+    if [ -d "$DOWNLOADS_DIR" ]; then
+        DOWNLOADED_RPM=$(find "$DOWNLOADS_DIR" -name "zabbix-agent2-${version}*.rpm" -type f 2>/dev/null | head -1)
+    fi
+    
+    # Install from downloaded RPM if available, otherwise use repository
+    if [ -n "$DOWNLOADED_RPM" ] && [ -f "$DOWNLOADED_RPM" ]; then
+        print_info "Found pre-downloaded package: $(basename "$DOWNLOADED_RPM")"
+        print_info "Installing from local file..."
+        
+        if rpm -Uvh "$DOWNLOADED_RPM"; then
+            print_success "Zabbix Agent 2 installed from downloaded package"
+            return 0
+        else
+            print_warning "Failed to install from downloaded package, falling back to repository..."
+        fi
+    fi
+    
+    # Fall back to repository installation  
+    print_info "Installing from Zabbix repository..."
+    
+    # Try exact version match first
+    if $PKG_MGR install -y "zabbix-agent2-${version}" 2>/dev/null; then
+        print_success "Zabbix Agent 2 version ${version} installed successfully"
+    else
+        # Try with wildcard for release variants (release1, release2, etc.)
+        print_info "Trying with version wildcard..."
+        if $PKG_MGR install -y zabbix-agent2-${version}* 2>/dev/null; then
+            print_success "Zabbix Agent 2 installed successfully"
+        else
+            # Last resort: install latest available
+            print_warning "Specific version not available, installing latest from repository..."
+            if $PKG_MGR install -y zabbix-agent2; then
+                INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
+                print_warning "Installed: $INSTALLED_VERSION (may differ from requested $version)"
+            else
+                print_error "Failed to install Zabbix Agent 2"
+                exit 1
+            fi
+        fi
+    fi
 }
 
 # Function to configure Zabbix Agent 2
@@ -429,7 +475,7 @@ main() {
     check_prerequisites
     install_prerequisites
     add_zabbix_repo "$VERSION"
-    install_zabbix_agent
+    install_zabbix_agent "$VERSION"
     configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME" "$PSK" "$PSK_IDENTITY"
     validate_configuration
     start_zabbix_service
