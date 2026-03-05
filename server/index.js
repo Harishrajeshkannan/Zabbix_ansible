@@ -609,6 +609,8 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     platform: 'RHEL',
+    version: '2.0.0',
+    features: 'DNF-only, PSK-removed, 755-permissions, detailed-logging',
     timestamp: new Date().toISOString() 
   });
 });

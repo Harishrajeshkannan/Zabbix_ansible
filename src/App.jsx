@@ -70,6 +70,31 @@ function App() {
     initializeData();
   }, [loadData]);
 
+  // Check backend server status on mount
+  useEffect(() => {
+    const checkBackendStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/health');
+        if (response.ok) {
+          const data = await response.json();
+          toast.success('✅ Backend Server Running', {
+            description: `Version: ${data.version} | Platform: ${data.platform} | Latest code deployed`,
+            duration: 5000,
+          });
+        }
+      } catch {
+        toast.error('❌ Backend Server Not Responding', {
+          description: 'Please ensure the backend server is running on port 3001',
+          duration: 5000,
+        });
+      }
+    };
+    
+    // Delay slightly to ensure UI is ready
+    const timer = setTimeout(checkBackendStatus, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Auto-refresh data every 5 minutes
   useEffect(() => {
     const interval = setInterval(() => {
