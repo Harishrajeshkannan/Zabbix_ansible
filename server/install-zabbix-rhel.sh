@@ -27,6 +27,8 @@ DEFAULT_LISTEN_PORT="10050"
 # Create log file
 LOG_FILE="/tmp/zabbix_install_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
+# Set log file permissions
+chmod 755 "$LOG_FILE" 2>/dev/null || true
 
 # Function to print colored output
 print_info() {

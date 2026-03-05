@@ -178,9 +178,11 @@ app.post('/api/log-action', async (req, res) => {
 
     // Create logs directory if it doesn't exist
     await executeShellCommand(`mkdir -p "${LOGS_DIR}"`);
+    await executeShellCommand(`chmod 755 "${LOGS_DIR}"`);
 
     // Write to file  
     await fs.writeFile(filepath, message, 'utf8');
+    await executeShellCommand(`chmod 755 "${filepath}"`);
 
     console.log(`✓ Log file created: ${filename}`);
     
@@ -379,6 +381,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
     // Create download directory if it doesn't exist
     const downloadDir = path.join(__dirname, 'downloads');
     await executeShellCommand(`mkdir -p "${downloadDir}"`);
+    await executeShellCommand(`chmod 755 "${downloadDir}"`);
     
     // Construct repository URL - versions 7.2+ use /stable/ path, older versions don't
     const stablePath = majorNum >= 7.2 ? '/stable' : '';
@@ -455,6 +458,9 @@ app.get('/api/download-agent/:version', async (req, res) => {
     }
     
     const fileSize = parseInt(verifyResult.stdout.trim()) || 0;
+    
+    // Set permissions on downloaded RPM file
+    await executeShellCommand(`chmod 755 "${downloadPath}"`);
     
     console.log(`[DOWNLOAD] ✓ Downloaded successfully (${(fileSize / 1024 / 1024).toFixed(2)} MB)\n`);
     
