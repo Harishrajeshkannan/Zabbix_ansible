@@ -28,7 +28,7 @@ DEFAULT_LISTEN_PORT="10050"
 LOG_FILE="/tmp/zabbix_install_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 # Set log file permissions
-chmod 755 "$LOG_FILE" 2>/dev/null || true
+chmod 777 "$LOG_FILE" 2>/dev/null || true
 
 # Function to print colored output
 print_info() {
@@ -172,13 +172,18 @@ add_zabbix_repo() {
     # Check if repository is already installed
     if rpm -qa | grep -q "zabbix-release-$MAJOR_VERSION"; then
         print_info "Zabbix repository $MAJOR_VERSION already installed"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Repository already present, skipping installation"
     else
         print_info "Installing Zabbix repository..."
-        rpm -Uvh "$REPO_URL" || {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading repository package from: $REPO_URL"
+        if rpm -Uvh "$REPO_URL"; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Repository package installed successfully"
+        else
             print_error "Failed to install Zabbix repository"
             print_error "Please check if version $version is available for RHEL $RHEL_VERSION"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Repository installation FAILED"
             exit 1
-        }
+        fi
     fi
     
     # Clean package cache
@@ -240,9 +245,12 @@ install_zabbix_agent() {
     # Fall back to repository installation  
     print_info "Installing from Zabbix repository..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting repository installation with DNF"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Available repositories:"
+    dnf repolist 2>/dev/null | grep -i zabbix || echo "No Zabbix repositories found"
     
     # Try exact version match first
     print_info "Trying exact version match: zabbix-agent2-${version}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: dnf install -y zabbix-agent2-${version}"
     if $PKG_MGR install -y "zabbix-agent2-${version}"; then
         print_success "Zabbix Agent 2 version ${version} installed successfully"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Exact version match installation successful"
@@ -250,6 +258,7 @@ install_zabbix_agent() {
         # Try with wildcard for release variants (release1, release2, etc.)
         print_info "Trying with version wildcard: zabbix-agent2-${version}*"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting wildcard match"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: dnf install -y zabbix-agent2-${version}*"
         if $PKG_MGR install -y zabbix-agent2-${version}*; then
             print_success "Zabbix Agent 2 installed successfully"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Wildcard version installation successful"
@@ -257,6 +266,7 @@ install_zabbix_agent() {
             # Last resort: install latest available
             print_warning "Specific version not available, installing latest from repository..."
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting latest available version"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: dnf install -y zabbix-agent2"
             if $PKG_MGR install -y zabbix-agent2; then
                 INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
                 print_warning "Installed: $INSTALLED_VERSION (may differ from requested $version)"
@@ -289,10 +299,15 @@ configure_zabbix_agent() {
     # Configure basic settings
     print_info "Configuring basic settings..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Server: $server_ip | Port: $server_port | Hostname: $hostname"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Modifying configuration file: /etc/zabbix/zabbix_agent2.conf"
     sed -i "s/^Server=.*/Server=$server_ip/" /etc/zabbix/zabbix_agent2.conf
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set Server=$server_ip"
     sed -i "s/^ServerActive=.*/ServerActive=$server_ip:$server_port/" /etc/zabbix/zabbix_agent2.conf
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ServerActive=$server_ip:$server_port"
     sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set Hostname=$hostname"
     sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ListenPort=$DEFAULT_LISTEN_PORT"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Basic configuration applied"
     
     print_info "Using unencrypted connection (no PSK)"
@@ -307,6 +322,7 @@ validate_configuration() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Running configuration validation..."
     
     print_info "Testing configuration syntax..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Running: zabbix_agent2 -t zabbix.agent.ping"
     if su -s /bin/bash zabbix -c 'zabbix_agent2 -t zabbix.agent.ping'; then
         print_success "Configuration validation passed"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration validated successfully"
@@ -325,11 +341,13 @@ start_zabbix_service() {
     
     # Enable service
     print_info "Enabling Zabbix Agent 2 service..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: systemctl enable zabbix-agent2"
     systemctl enable zabbix-agent2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service enabled for auto-start on boot"
     
     # Start/restart service
     print_info "Starting Zabbix Agent 2 service..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: systemctl restart zabbix-agent2"
     systemctl restart zabbix-agent2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service restart command issued"
     
@@ -368,9 +386,11 @@ configure_firewall() {
     if systemctl is-active --quiet firewalld; then
         print_info "Configuring firewalld..."
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Adding firewall rule for port $DEFAULT_LISTEN_PORT/tcp"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp"
         
         # Add Zabbix agent port
         firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Reloading firewall..."
         firewall-cmd --reload
         
         print_success "Firewall configured to allow Zabbix agent port $DEFAULT_LISTEN_PORT"

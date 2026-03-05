@@ -41,8 +41,9 @@ async function setupPasswordlessSudo() {
     console.log('🔧 Configuring passwordless sudo automatically...');
     console.log(`   Running: ${setupScript}`);
     
-    // Make setup script executable
-    await executeShellCommand(`chmod +x "${setupScript}"`);
+    // Make setup script executable with 755 permissions
+    await executeShellCommand(`chmod 755 "${setupScript}"`);
+    console.log('   Setup script permissions: 755 (rwxr-xr-x)');
     
     // Run setup script with sudo (user may be prompted for password once)
     const result = await executeShellCommand(`sudo bash "${setupScript}"`, { timeout: 30000 });
@@ -182,7 +183,7 @@ app.post('/api/log-action', async (req, res) => {
 
     // Write to file  
     await fs.writeFile(filepath, message, 'utf8');
-    await executeShellCommand(`chmod 755 "${filepath}"`);
+    await executeShellCommand(`chmod 777 "${filepath}"`);
 
     console.log(`✓ Log file created: ${filename}`);
     
@@ -558,10 +559,12 @@ app.post('/api/install-localhost', async (req, res) => {
     // Get the path to the installation script
     const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
     
-    // Make sure script is executable
-    await executeShellCommand(`chmod +x "${scriptPath}"`);
+    // Make sure script is executable with 755 permissions
+    await executeShellCommand(`chmod 755 "${scriptPath}"`);
+    console.log(`[INSTALL] Installation script permissions: 755 (rwxr-xr-x)`);
     
     console.log(`[INSTALL] Executing installation script with passwordless sudo...`);
+    console.log(`[INSTALL] Script path: ${scriptPath}\n`);
     
     // SECURITY: No password handling - relies on sudoers configuration
     // Execute installation directly with sudo (requires passwordless sudo setup)
