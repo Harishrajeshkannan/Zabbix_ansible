@@ -26,9 +26,18 @@ DEFAULT_LISTEN_PORT="10050"
 
 # Create log file
 LOG_FILE="/tmp/zabbix_install_$(date +%Y%m%d_%H%M%S).log"
+# Touch file to ensure it exists before redirecting
+touch "$LOG_FILE"
+chmod 777 "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation log started" >> "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG_FILE (permissions: 777)" >> "$LOG_FILE"
+# Redirect all output to log file
 exec > >(tee -a "$LOG_FILE") 2>&1
-# Set log file permissions
-chmod 777 "$LOG_FILE" 2>/dev/null || true
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] =========================================="
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Zabbix Agent Installation Started"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] =========================================="
 
 # Function to print colored output
 print_info() {
@@ -519,6 +528,11 @@ main() {
     
     # Show summary
     show_summary "$VERSION" "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
+    
+    # Show log file location
+    echo ""
+    print_success "Installation log saved to: $LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file location: $LOG_FILE (permissions: 777)"
 }
 
 # Error handling
