@@ -487,7 +487,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
  */
 app.post('/api/install-localhost', async (req, res) => {
   try {
-    const { version, serverIP, serverPort = 10051, hostname, psk, pskIdentity } = req.body;
+    const { version, serverIP, serverPort = 10051, hostname } = req.body;
     
     // Validate required fields
     if (!version || !serverIP || !hostname) {
@@ -547,8 +547,7 @@ app.post('/api/install-localhost', async (req, res) => {
     
     console.log(`\n[INSTALL] Version: ${version}`);
     console.log(`[INSTALL] Server: ${serverIP}:${serverPort}`);
-    console.log(`[INSTALL] Hostname: ${hostname}`);
-    console.log(`[INSTALL] PSK: ${psk ? 'Enabled' : 'Disabled'}\n`);
+    console.log(`[INSTALL] Hostname: ${hostname}\n`);
     
     // Get the path to the installation script
     const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
@@ -556,15 +555,11 @@ app.post('/api/install-localhost', async (req, res) => {
     // Make sure script is executable
     await executeShellCommand(`chmod +x "${scriptPath}"`);
     
-    // Prepare parameters (validated above)
-    const pskParam = psk || 'none';
-    const pskIdentityParam = pskIdentity || hostname;
-    
     console.log(`[INSTALL] Executing installation script with passwordless sudo...`);
     
     // SECURITY: No password handling - relies on sudoers configuration
     // Execute installation directly with sudo (requires passwordless sudo setup)
-    const installCommand = `sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}" "${pskParam}" "${pskIdentityParam}"`;
+    const installCommand = `sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}"`;
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     

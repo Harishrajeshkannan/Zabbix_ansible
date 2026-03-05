@@ -8,10 +8,7 @@ const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentV
     version: '',
     serverIP: '',
     serverPort: '10051',
-    hostname: hostname || 'localhost',
-    usePSK: false,
-    psk: '',
-    pskIdentity: ''
+    hostname: hostname || 'localhost'
   });
 
   useEffect(() => {
@@ -148,47 +145,6 @@ const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentV
                   required
                 />
               </div>
-
-              <div className="form-group checkbox-group">
-                <label>
-                  <input
-                    type="checkbox"
-                    name="usePSK"
-                    checked={formData.usePSK}
-                    onChange={handleChange}
-                  />
-                  <span>Use PSK Encryption</span>
-                </label>
-              </div>
-
-              {formData.usePSK && (
-                <>
-                  <div className="form-group">
-                    <label htmlFor="pskIdentity">PSK Identity</label>
-                    <input
-                      type="text"
-                      id="pskIdentity"
-                      name="pskIdentity"
-                      value={formData.pskIdentity}
-                      onChange={handleChange}
-                      placeholder="PSK Identity"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="psk">PSK (Pre-Shared Key)</label>
-                    <textarea
-                      id="psk"
-                      name="psk"
-                      value={formData.psk}
-                      onChange={handleChange}
-                      placeholder="Enter PSK in hex format"
-                      rows="3"
-                    />
-                    <small>Enter the pre-shared key in hexadecimal format (64 characters)</small>
-                  </div>
-                </>
-              )}
             </>
           )}
 

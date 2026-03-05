@@ -1,13 +1,13 @@
 #!/bin/bash
 # Zabbix Agent 2 Installation Script for RHEL/CentOS/Rocky/AlmaLinux
 # This script must be run with sudo/root privileges
-# Usage: sudo ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]
+# Usage: sudo ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]
 #
 # Examples:
 #   sudo ./install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver.example.com
-#   sudo ./install-zabbix-rhel.sh 6.4.18 zabbix.company.com myserver 10051 "my-secret-psk" "myserver-psk"
+#   sudo ./install-zabbix-rhel.sh 6.4.18 zabbix.company.com myserver 10051
 #
-# All parameters are required for automated installation
+# Version, Server IP, and Hostname are required. Server Port defaults to 10051.
 
 set -euo pipefail
 
@@ -104,20 +104,18 @@ detect_os() {
 # Function to check prerequisites
 check_prerequisites() {
     print_section "Checking Prerequisites"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting prerequisites check..."
     
-    # Check if running on RHEL-based system
-    if ! command_exists dnf && ! command_exists yum; then
-        print_error "This script requires a RHEL-based system with yum or dnf"
+    # Check if running on RHEL-based system with DNF
+    if ! command_exists dnf; then
+        print_error "This script requires a RHEL-based system with DNF package manager"
+        print_error "DNF is the standard package manager for RHEL 8+, CentOS 8+, Rocky Linux, and AlmaLinux"
         exit 1
     fi
     
-    # Determine package manager
-    PKG_MGR="yum"
-    if command_exists dnf; then
-        PKG_MGR="dnf"
-    fi
-    
-    print_info "Using package manager: $PKG_MGR"
+    # Use DNF as package manager
+    PKG_MGR="dnf"
+    print_info "Using package manager: DNF"
     
     # Running with elevated privileges
     print_success "Running with elevated privileges"
@@ -133,12 +131,15 @@ check_prerequisites() {
 # Function to install prerequisites
 install_prerequisites() {
     print_section "Installing Prerequisites"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing prerequisites..."
     
     print_info "Updating package cache..."
-    $PKG_MGR update -y -q
+    $PKG_MGR update -y
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache updated"
     
-    print_info "Installing required packages..."
+    print_info "Installing required packages (wget, curl, rpm)..."
     $PKG_MGR install -y wget curl rpm
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Required packages installed"
 }
 
 # Function to add Zabbix repository
@@ -146,6 +147,7 @@ add_zabbix_repo() {
     local version="$1"
     
     print_section "Adding Zabbix Repository"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuring Zabbix repository for version $version..."
     
     # Extract major.minor version
     MAJOR_VERSION=$(echo "$version" | cut -d. -f1-2)
@@ -154,8 +156,10 @@ add_zabbix_repo() {
     MAJOR_NUM=$(echo "$MAJOR_VERSION" | awk '{print $1}')
     if awk "BEGIN {exit !($MAJOR_NUM >= 7.2)}"; then
         STABLE_PATH="/stable"
+        print_info "Version $MAJOR_NUM uses /stable/ repository path"
     else
         STABLE_PATH=""
+        print_info "Version $MAJOR_NUM uses legacy repository path"
     fi
     
     # Build repository URL
@@ -177,7 +181,8 @@ add_zabbix_repo() {
     
     # Clean package cache
     print_info "Cleaning package cache..."
-    $PKG_MGR clean all -q
+    $PKG_MGR clean all
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache cleaned"
 }
 
 # Function to install Zabbix Agent 2
@@ -185,15 +190,18 @@ install_zabbix_agent() {
     local version="$1"
     
     print_section "Installing Zabbix Agent 2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Zabbix Agent 2 installation..."
     
     # Check if already installed
     if rpm -qa | grep -q zabbix-agent2; then
         INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
         print_warning "Zabbix Agent 2 already installed: $INSTALLED_VERSION"
         print_info "Proceeding with reinstall/update..."
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Existing version: $INSTALLED_VERSION"
     fi
     
     print_info "Installing Zabbix Agent 2 version ${version}..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Requested version: ${version}"
     
     # Check if RPM file was pre-downloaded
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -208,35 +216,46 @@ install_zabbix_agent() {
     # Install from downloaded RPM if available, otherwise use repository
     if [ -n "$DOWNLOADED_RPM" ] && [ -f "$DOWNLOADED_RPM" ]; then
         print_info "Found pre-downloaded package: $(basename "$DOWNLOADED_RPM")"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package path: $DOWNLOADED_RPM"
         print_info "Installing from local file..."
         
         if rpm -Uvh "$DOWNLOADED_RPM"; then
             print_success "Zabbix Agent 2 installed from downloaded package"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation from local RPM successful"
             return 0
         else
             print_warning "Failed to install from downloaded package, falling back to repository..."
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Local RPM installation failed, trying repository"
         fi
     fi
     
     # Fall back to repository installation  
     print_info "Installing from Zabbix repository..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting repository installation with DNF"
     
     # Try exact version match first
-    if $PKG_MGR install -y "zabbix-agent2-${version}" 2>/dev/null; then
+    print_info "Trying exact version match: zabbix-agent2-${version}"
+    if $PKG_MGR install -y "zabbix-agent2-${version}"; then
         print_success "Zabbix Agent 2 version ${version} installed successfully"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Exact version match installation successful"
     else
         # Try with wildcard for release variants (release1, release2, etc.)
-        print_info "Trying with version wildcard..."
-        if $PKG_MGR install -y zabbix-agent2-${version}* 2>/dev/null; then
+        print_info "Trying with version wildcard: zabbix-agent2-${version}*"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting wildcard match"
+        if $PKG_MGR install -y zabbix-agent2-${version}*; then
             print_success "Zabbix Agent 2 installed successfully"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Wildcard version installation successful"
         else
             # Last resort: install latest available
             print_warning "Specific version not available, installing latest from repository..."
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting latest available version"
             if $PKG_MGR install -y zabbix-agent2; then
                 INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
                 print_warning "Installed: $INSTALLED_VERSION (may differ from requested $version)"
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Latest version installation successful: $INSTALLED_VERSION"
             else
                 print_error "Failed to install Zabbix Agent 2"
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] All installation attempts failed"
                 exit 1
             fi
         fi
@@ -248,60 +267,45 @@ configure_zabbix_agent() {
     local server_ip="$1"
     local server_port="$2"
     local hostname="$3"
-    local psk="$4"
-    local psk_identity="$5"
     
     print_section "Configuring Zabbix Agent 2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting configuration..."
     
     # Backup original configuration
     if [ ! -f /etc/zabbix/zabbix_agent2.conf.backup ]; then
         print_info "Creating backup of original configuration..."
         cp /etc/zabbix/zabbix_agent2.conf /etc/zabbix/zabbix_agent2.conf.backup
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration backup created"
     fi
     
     # Configure basic settings
     print_info "Configuring basic settings..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Server: $server_ip | Port: $server_port | Hostname: $hostname"
     sed -i "s/^Server=.*/Server=$server_ip/" /etc/zabbix/zabbix_agent2.conf
     sed -i "s/^ServerActive=.*/ServerActive=$server_ip:$server_port/" /etc/zabbix/zabbix_agent2.conf
     sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
     sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Basic configuration applied"
     
-    # Configure PSK encryption if provided
-    if [ -n "$psk" ] && [ "$psk" != "none" ]; then
-        print_info "Configuring PSK encryption..."
-        
-        # Create PSK file
-        echo "$psk" | tee /etc/zabbix/zabbix_agent2.psk >/dev/null
-        chown zabbix:zabbix /etc/zabbix/zabbix_agent2.psk
-        chmod 600 /etc/zabbix/zabbix_agent2.psk
-        
-        # Set PSK identity (use hostname if not specified)
-        if [ -z "$psk_identity" ] || [ "$psk_identity" = "none" ]; then
-            psk_identity="$hostname"
-        fi
-        
-        # Update configuration for PSK
-        sed -i 's/^# TLSConnect=.*/TLSConnect=psk/' /etc/zabbix/zabbix_agent2.conf
-        sed -i 's/^# TLSAccept=.*/TLSAccept=psk/' /etc/zabbix/zabbix_agent2.conf
-        sed -i "s/^# TLSPSKIdentity=.*/TLSPSKIdentity=$psk_identity/" /etc/zabbix/zabbix_agent2.conf
-        sed -i 's|^# TLSPSKFile=.*|TLSPSKFile=/etc/zabbix/zabbix_agent2.psk|' /etc/zabbix/zabbix_agent2.conf
-        
-        print_success "PSK encryption configured (Identity: $psk_identity)"
-    else
-        print_info "PSK encryption not configured (plaintext communication)"
-    fi
+    print_info "Using unencrypted connection (no PSK)"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration uses plaintext communication"
+    
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration completed successfully"
 }
 
 # Function to validate configuration
 validate_configuration() {
     print_section "Validating Configuration"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Running configuration validation..."
     
     print_info "Testing configuration syntax..."
     if su -s /bin/bash zabbix -c 'zabbix_agent2 -t zabbix.agent.ping'; then
         print_success "Configuration validation passed"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration validated successfully"
     else
         print_error "Configuration validation failed"
         print_error "Please check the configuration file: /etc/zabbix/zabbix_agent2.conf"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration validation FAILED"
         exit 1
     fi
 }
@@ -309,14 +313,17 @@ validate_configuration() {
 # Function to start and enable service
 start_zabbix_service() {
     print_section "Starting Zabbix Agent 2 Service"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuring service..."
     
     # Enable service
     print_info "Enabling Zabbix Agent 2 service..."
     systemctl enable zabbix-agent2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service enabled for auto-start on boot"
     
     # Start/restart service
     print_info "Starting Zabbix Agent 2 service..."
     systemctl restart zabbix-agent2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service restart command issued"
     
     # Wait for service to start
     sleep 3
@@ -324,12 +331,14 @@ start_zabbix_service() {
     # Check service status
     if systemctl is-active --quiet zabbix-agent2; then
         print_success "Zabbix Agent 2 service is running"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service status: ACTIVE"
         
         # Show detailed status
         echo ""
         systemctl status zabbix-agent2 --no-pager -l
     else
         print_error "Zabbix Agent 2 service failed to start"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service status: FAILED"
         
         # Show error details
         echo ""
@@ -346,20 +355,25 @@ start_zabbix_service() {
 # Function to configure firewall
 configure_firewall() {
     print_section "Configuring Firewall"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Checking firewall configuration..."
     
     if systemctl is-active --quiet firewalld; then
         print_info "Configuring firewalld..."
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Adding firewall rule for port $DEFAULT_LISTEN_PORT/tcp"
         
         # Add Zabbix agent port
         firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp
         firewall-cmd --reload
         
         print_success "Firewall configured to allow Zabbix agent port $DEFAULT_LISTEN_PORT"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Firewall rule added and reloaded"
     elif systemctl is-enabled --quiet iptables 2>/dev/null; then
         print_warning "iptables detected but automatic configuration not implemented"
         print_info "Please manually allow port $DEFAULT_LISTEN_PORT/tcp in your iptables rules"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] iptables detected - manual configuration required"
     else
         print_info "No active firewall detected or firewall management not needed"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] No firewall configuration needed"
     fi
 }
 
@@ -369,9 +383,9 @@ show_summary() {
     local server_ip="$2"
     local server_port="$3"
     local hostname="$4"
-    local psk="$5"
     
     print_section "Installation Summary"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Generating installation summary..."
     
     echo ""
     echo "🎉 Zabbix Agent 2 $version has been successfully installed and configured!"
@@ -380,16 +394,13 @@ show_summary() {
     echo "  • Hostname: $hostname"
     echo "  • Zabbix Server: $server_ip:$server_port"
     echo "  • Listen Port: $DEFAULT_LISTEN_PORT"
-    echo "  • Encryption: $([ -n "$psk" ] && [ "$psk" != "none" ] && echo "PSK enabled" || echo "None (plaintext)")"
+    echo "  • Encryption: None (plaintext)"
     echo "  • Service: zabbix-agent2 (enabled and running)"
     echo ""
     echo "File Locations:"
     echo "  • Configuration: /etc/zabbix/zabbix_agent2.conf"
     echo "  • Backup: /etc/zabbix/zabbix_agent2.conf.backup"
     echo "  • Log File: $LOG_FILE"
-    if [ -n "$psk" ] && [ "$psk" != "none" ]; then
-        echo "  • PSK File: /etc/zabbix/zabbix_agent2.psk"
-    fi
     echo ""
     echo "Useful Commands:"
     echo "  • Check status: systemctl status zabbix-agent2"
@@ -407,6 +418,8 @@ show_summary() {
     
     echo ""
     print_success "Installation completed successfully!"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== ALL STEPS COMPLETED ==========
+"
 }
 
 # Main function
@@ -416,6 +429,9 @@ main() {
     echo "   for RHEL/CentOS/Rocky/AlmaLinux"
     echo "==========================================="
     echo ""
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Script started"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG_FILE"
+    echo ""
     
     # Detect operating system
     detect_os
@@ -423,11 +439,11 @@ main() {
     # Parse command line arguments (automated mode only)
     if [ $# -lt 2 ]; then
         print_error "Insufficient arguments for automated installation"
-        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
+        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
         echo ""
         echo "Examples:"
         echo "  sudo $0 7.0.5 192.168.1.100 myserver.example.com"
-        echo "  sudo $0 6.4.18 zabbix.company.com myserver 10051 \"my-secret-psk\" \"myserver-psk\""
+        echo "  sudo $0 6.4.18 zabbix.company.com myserver 10051"
         exit 1
     fi
     
@@ -436,12 +452,10 @@ main() {
     SERVER_IP="${2:-}"
     HOSTNAME="${3:-$(hostname -f 2>/dev/null || hostname)}"
     SERVER_PORT="${4:-$DEFAULT_SERVER_PORT}"
-    PSK="${5:-}"
-    PSK_IDENTITY="${6:-$HOSTNAME}"
     
     if [ -z "$SERVER_IP" ]; then
         print_error "Server IP is required"
-        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
+        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
         exit 1
     fi
     
@@ -450,39 +464,33 @@ main() {
         exit 1
     fi
     
-    # Normalize PSK values
-    if [ "$PSK" = "none" ] || [ -z "$PSK" ]; then
-        PSK=""
-        PSK_IDENTITY=""
-    fi
-    
     # Display configuration
     echo ""
     print_section "Installation Configuration"
     echo "Version: $VERSION"
     echo "Server: $SERVER_IP:$SERVER_PORT"
     echo "Hostname: $HOSTNAME"
-    echo "PSK Encryption: $([ -n "$PSK" ] && echo "Enabled" || echo "Disabled")"
-    if [ -n "$PSK" ]; then
-        echo "PSK Identity: $PSK_IDENTITY"
-    fi
+    echo "Encryption: Disabled (plaintext)"
     echo "Log File: $LOG_FILE"
     echo ""
     
     print_info "Proceeding with installation..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== INSTALLATION STARTED =========="
     
     # Run installation steps
     check_prerequisites
     install_prerequisites
     add_zabbix_repo "$VERSION"
     install_zabbix_agent "$VERSION"
-    configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME" "$PSK" "$PSK_IDENTITY"
+    configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
     validate_configuration
     start_zabbix_service
     configure_firewall
     
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== INSTALLATION COMPLETED =========="
+    
     # Show summary
-    show_summary "$VERSION" "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME" "$PSK"
+    show_summary "$VERSION" "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
 }
 
 # Error handling
@@ -491,7 +499,7 @@ trap 'print_error "Script interrupted"; exit 1' INT TERM
 # Check if running with elevated privileges
 if [ "$EUID" -ne 0 ]; then
     print_error "This script must be run with sudo or as root"
-    echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [PSK] [PSK_IDENTITY]"
+    echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
     exit 1
 fi
 
