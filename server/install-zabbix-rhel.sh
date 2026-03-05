@@ -217,6 +217,12 @@ install_zabbix_agent() {
     if [ -n "$DOWNLOADED_RPM" ] && [ -f "$DOWNLOADED_RPM" ]; then
         print_info "Found pre-downloaded package: $(basename "$DOWNLOADED_RPM")"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package path: $DOWNLOADED_RPM"
+        
+        # Make RPM package executable
+        print_info "Setting executable permissions on RPM package..."
+        chmod +x "$DOWNLOADED_RPM"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] RPM package permissions set to executable"
+        
         print_info "Installing from local file..."
         
         if rpm -Uvh "$DOWNLOADED_RPM"; then
