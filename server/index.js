@@ -5,6 +5,8 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
+import fsSync from 'fs';
+import process from 'process';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -556,22 +558,57 @@ app.post('/api/install-localhost', async (req, res) => {
     console.log(`[INSTALL] Server: ${serverIP}:${serverPort}`);
     console.log(`[INSTALL] Hostname: ${hostname}\n`);
     
+    // Check platform
+    const platform = process.platform;
+    console.log(`[INSTALL] Platform: ${platform}`);
+    if (platform === 'win32') {
+      console.error(`[INSTALL] ERROR: Cannot install on Windows. This endpoint requires RHEL/Linux.`);
+      return res.status(400).json({
+        error: 'Platform not supported',
+        details: 'This installation endpoint only works on RHEL/Linux systems. Please run the backend on a RHEL server.'
+      });
+    }
+    
     // Get the path to the installation script
     const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
     
+    // Check if script exists
+    if (!fsSync.existsSync(scriptPath)) {
+      console.error(`[INSTALL] ERROR: Script not found at ${scriptPath}`);
+      return res.status(500).json({
+        error: 'Installation script not found',
+        details: `Script path: ${scriptPath}`
+      });
+    }
+    console.log(`[INSTALL] Script exists at: ${scriptPath}`);
+    
     // Make sure script is executable with 755 permissions
-    await executeShellCommand(`chmod 755 "${scriptPath}"`);
-    console.log(`[INSTALL] Installation script permissions: 755 (rwxr-xr-x)`);
+    try {
+      await executeShellCommand(`chmod 755 "${scriptPath}"`);
+      console.log(`[INSTALL] Installation script permissions: 755 (rwxr-xr-x)`);
+    } catch (chmodErr) {
+      console.error(`[INSTALL] WARNING: Could not set script permissions: ${chmodErr.message}`);
+    }
     
     console.log(`[INSTALL] Executing installation script with passwordless sudo...`);
     console.log(`[INSTALL] Script path: ${scriptPath}\n`);
     
+    // Debug: Log all parameters
+    console.log(`[INSTALL] Parameters being passed:`);
+    console.log(`  - version: "${version}" (type: ${typeof version})`);
+    console.log(`  - serverIP: "${serverIP}" (type: ${typeof serverIP})`);
+    console.log(`  - hostname: "${hostname}" (type: ${typeof hostname})`);
+    console.log(`  - serverPort: "${serverPort}" (type: ${typeof serverPort})\n`);
+    
     // SECURITY: No password handling - relies on sudoers configuration
     // Execute installation directly with sudo (requires passwordless sudo setup)
     const installCommand = `sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}"`;
+    console.log(`[INSTALL] Full command: ${installCommand}\n`);
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     
+    console.log(`[INSTALL] Exit code: ${result.code || 0}`);
+    console.log(`[INSTALL] Success: ${result.success}`);
     console.log(`[INSTALL] Output:\n${result.stdout}`);
     if (result.stderr) {
       console.log(`[INSTALL] Errors:\n${result.stderr}`);

@@ -473,9 +473,19 @@ main() {
     # Detect operating system
     detect_os
     
+    # Debug: Show received arguments
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Number of arguments received: $#"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 1 (VERSION): '$1'"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 2 (SERVER_IP): '$2'"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 3 (HOSTNAME): '$3'"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 4 (SERVER_PORT): '$4'"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: All arguments: $@"
+    echo ""
+    
     # Parse command line arguments (automated mode only)
     if [ $# -lt 2 ]; then
         print_error "Insufficient arguments for automated installation"
+        echo "Received $# arguments: $@"
         echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
         echo ""
         echo "Examples:"
