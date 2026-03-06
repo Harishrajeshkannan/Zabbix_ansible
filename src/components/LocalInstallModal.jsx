@@ -25,6 +25,9 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     e.preventDefault();
     setInstalling(true);
     
+    console.log('[LocalInstallModal] Form submitted');
+    console.log('[LocalInstallModal] Form data:', formData);
+    
     try {
       await onInstall(formData);
       onClose();

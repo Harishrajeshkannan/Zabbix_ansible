@@ -114,10 +114,16 @@ export const downloadAgentPackage = async (version) => {
  * @returns {Promise<Object>} Response from backend
  */
 export const installLocalhostAgent = async (installData) => {
+  console.log('[backendService] installLocalhostAgent called');
+  console.log('[backendService] Install data:', installData);
+  console.log('[backendService] Backend URL:', BACKEND_API_URL);
+  
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 420000); // 7 minute timeout
 
+    console.log('[backendService] Making POST request to:', `${BACKEND_API_URL}/install-localhost`);
+    
     const response = await fetch(`${BACKEND_API_URL}/install-localhost`, {
       method: 'POST',
       headers: {
@@ -127,6 +133,9 @@ export const installLocalhostAgent = async (installData) => {
       signal: controller.signal,
     });
 
+    console.log('[backendService] Response status:', response.status);
+    console.log('[backendService] Response ok:', response.ok);
+    
     clearTimeout(timeoutId);
 
     if (!response.ok) {

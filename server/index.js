@@ -501,6 +501,10 @@ app.get('/api/download-agent/:version', async (req, res) => {
  *   nodeuser ALL=(ALL) NOPASSWD: /path/to/install-zabbix-rhel.sh
  */
 app.post('/api/install-localhost', async (req, res) => {
+  console.log('\n[INSTALL] ========================================');
+  console.log('[INSTALL] /api/install-localhost endpoint HIT!');
+  console.log('[INSTALL] ========================================\n');
+  
   try {
     // Log to file for debugging
     const timestamp = Date.now();
