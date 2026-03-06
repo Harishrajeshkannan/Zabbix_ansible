@@ -71,6 +71,10 @@ async function setupPasswordlessSudo() {
 async function executeShellCommand(command, options = {}) {
   const { timeout = 180000, maxBuffer = 5 * 1024 * 1024 } = options;
   
+  console.log(`[executeShellCommand] Received command: "${command}"`);
+  console.log(`[executeShellCommand] Command length: ${command.length}`);
+  console.log(`[executeShellCommand] Timeout: ${timeout}ms`);
+  
   try {
     const { stdout, stderr } = await execAsync(command, { 
       timeout, 
@@ -78,8 +82,10 @@ async function executeShellCommand(command, options = {}) {
       shell: '/bin/bash'
     });
     
+    console.log(`[executeShellCommand] Execution successful`);
     return { stdout, stderr, success: true };
   } catch (error) {
+    console.log(`[executeShellCommand] Execution failed: ${error.message}`);
     return { 
       stdout: error.stdout || '', 
       stderr: error.stderr || '', 
@@ -615,8 +621,12 @@ app.post('/api/install-localhost', async (req, res) => {
     const installCommand = `sudo ${scriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[INSTALL] Full command: ${installCommand}\n`);
     
+    console.log(`[INSTALL] About to execute command...`);
+    console.log(`[INSTALL] Command length: ${installCommand.length} characters`);
+    
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     
+    console.log(`[INSTALL] Command execution completed`);
     console.log(`[INSTALL] Exit code: ${result.code || 0}`);
     console.log(`[INSTALL] Success: ${result.success}`);
     console.log(`[INSTALL] Output:\n${result.stdout}`);
