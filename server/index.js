@@ -655,7 +655,7 @@ app.post('/api/install-localhost', async (req, res) => {
       await fs.appendFile(debugLog, `  ${serverPort}\n`);
       // Ensure permissions are set
       await executeShellCommand(`chmod 777 ${debugLog}`);
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     
     console.log(`[INSTALL] About to execute command...`);
     console.log(`[INSTALL] Command length: ${installCommand.length} characters`);
