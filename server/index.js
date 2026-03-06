@@ -496,7 +496,16 @@ app.get('/api/download-agent/:version', async (req, res) => {
  */
 app.post('/api/install-localhost', async (req, res) => {
   try {
+    console.log('\n[INSTALL] ========== NEW INSTALLATION REQUEST ==========');
+    console.log('[INSTALL] Raw request body:', JSON.stringify(req.body, null, 2));
+    
     const { version, serverIP, serverPort = 10051, hostname } = req.body;
+    
+    console.log('[INSTALL] Extracted values:');
+    console.log(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
+    console.log(`  - serverIP: ${serverIP} (type: ${typeof serverIP}, truthy: ${!!serverIP})`);
+    console.log(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
+    console.log(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
     
     // Validate required fields
     if (!version || !serverIP || !hostname) {
@@ -602,7 +611,8 @@ app.post('/api/install-localhost', async (req, res) => {
     
     // SECURITY: No password handling - relies on sudoers configuration
     // Execute installation directly with sudo (requires passwordless sudo setup)
-    const installCommand = `sudo "${scriptPath}" "${version}" "${serverIP}" "${hostname}" "${serverPort}"`;
+    // Note: Arguments are pre-validated to contain only safe characters
+    const installCommand = `sudo ${scriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[INSTALL] Full command: ${installCommand}\n`);
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
