@@ -502,16 +502,36 @@ app.get('/api/download-agent/:version', async (req, res) => {
  */
 app.post('/api/install-localhost', async (req, res) => {
   try {
+    // Log to file for debugging
+    const timestamp = Date.now();
+    const debugLog = `/tmp/backend_debug_${timestamp}.log`;
+    const debugInfo = [
+      `\n========== NEW INSTALLATION REQUEST ==========`,
+      `Timestamp: ${new Date().toISOString()}`,
+      `Raw request body: ${JSON.stringify(req.body, null, 2)}`,
+      `Body keys: ${Object.keys(req.body).join(', ')}`,
+    ];
+    
     console.log('\n[INSTALL] ========== NEW INSTALLATION REQUEST ==========');
     console.log('[INSTALL] Raw request body:', JSON.stringify(req.body, null, 2));
     
     const { version, serverIP, serverPort = 10051, hostname } = req.body;
+    
+    debugInfo.push(`\nExtracted values:`);
+    debugInfo.push(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
+    debugInfo.push(`  - serverIP: ${serverIP} (type: ${typeof serverIP}, truthy: ${!!serverIP})`);
+    debugInfo.push(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
+    debugInfo.push(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
+    
+    await fs.writeFile(debugLog, debugInfo.join('\n'));
+    await executeShellCommand(`chmod 777 ${debugLog}`);
     
     console.log('[INSTALL] Extracted values:');
     console.log(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
     console.log(`  - serverIP: ${serverIP} (type: ${typeof serverIP}, truthy: ${!!serverIP})`);
     console.log(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
     console.log(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
+    console.log(`[INSTALL] Debug log: ${debugLog}`);
     
     // Validate required fields
     if (!version || !serverIP || !hostname) {
@@ -621,8 +641,23 @@ app.post('/api/install-localhost', async (req, res) => {
     const installCommand = `sudo ${scriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[INSTALL] Full command: ${installCommand}\n`);
     
+    // Add command to debug log
+    try {
+      await fs.appendFile(debugLog, `\nScript path: ${scriptPath}\n`);
+      await fs.appendFile(debugLog, `\nCommand being executed:\n${installCommand}\n`);
+      await fs.appendFile(debugLog, `Command length: ${installCommand.length} characters\n`);
+      await fs.appendFile(debugLog, `\nCommand breakdown:\n`);
+      await fs.appendFile(debugLog, `  sudo\n`);
+      await fs.appendFile(debugLog, `  ${scriptPath}\n`);
+      await fs.appendFile(debugLog, `  ${version}\n`);
+      await fs.appendFile(debugLog, `  ${serverIP}\n`);
+      await fs.appendFile(debugLog, `  ${hostname}\n`);
+      await fs.appendFile(debugLog, `  ${serverPort}\n`);
+    } catch (e) { /* ignore */ }
+    
     console.log(`[INSTALL] About to execute command...`);
     console.log(`[INSTALL] Command length: ${installCommand.length} characters`);
+    console.log(`[INSTALL] Debug log written to: ${debugLog}\n`);
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     
