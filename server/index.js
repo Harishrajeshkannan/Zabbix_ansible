@@ -525,13 +525,13 @@ app.post('/api/install-localhost', async (req, res) => {
     
     await fs.writeFile(debugLog, debugInfo.join('\n'));
     await executeShellCommand(`chmod 777 ${debugLog}`);
+    console.log(`[INSTALL] Debug log created: ${debugLog} (permissions: 777)`);
     
     console.log('[INSTALL] Extracted values:');
     console.log(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
     console.log(`  - serverIP: ${serverIP} (type: ${typeof serverIP}, truthy: ${!!serverIP})`);
     console.log(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
     console.log(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
-    console.log(`[INSTALL] Debug log: ${debugLog}`);
     
     // Validate required fields
     if (!version || !serverIP || !hostname) {
@@ -653,11 +653,13 @@ app.post('/api/install-localhost', async (req, res) => {
       await fs.appendFile(debugLog, `  ${serverIP}\n`);
       await fs.appendFile(debugLog, `  ${hostname}\n`);
       await fs.appendFile(debugLog, `  ${serverPort}\n`);
+      // Ensure permissions are set
+      await executeShellCommand(`chmod 777 ${debugLog}`);
     } catch (e) { /* ignore */ }
     
     console.log(`[INSTALL] About to execute command...`);
     console.log(`[INSTALL] Command length: ${installCommand.length} characters`);
-    console.log(`[INSTALL] Debug log written to: ${debugLog}\n`);
+    console.log(`[INSTALL] Debug log updated: ${debugLog} (permissions: 777)\n`);
     
     const result = await executeShellCommand(installCommand, { timeout: 600000 });
     
