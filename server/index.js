@@ -523,9 +523,21 @@ app.post('/api/install-localhost', async (req, res) => {
     debugInfo.push(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
     debugInfo.push(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
     
-    await fs.writeFile(debugLog, debugInfo.join('\n'));
-    await executeShellCommand(`chmod 777 ${debugLog}`);
-    console.log(`[INSTALL] Debug log created: ${debugLog} (permissions: 777)`);
+    // Create debug log file with error handling
+    try {
+      await fs.writeFile(debugLog, debugInfo.join('\n'));
+      await executeShellCommand(`chmod 777 ${debugLog}`);
+      console.log(`[INSTALL] Debug log created: ${debugLog} (permissions: 777)`);
+    } catch (logErr) {
+      console.error(`[INSTALL] WARNING: Could not create debug log: ${logErr.message}`);
+      // Try synchronous write as fallback
+      try {
+        fsSync.writeFileSync(debugLog, debugInfo.join('\n'), { mode: 0o777 });
+        console.log(`[INSTALL] Debug log created (sync): ${debugLog}`);
+      } catch (syncErr) {
+        console.error(`[INSTALL] ERROR: Could not create debug log (sync): ${syncErr.message}`);
+      }
+    }
     
     console.log('[INSTALL] Extracted values:');
     console.log(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
@@ -785,6 +797,16 @@ app.listen(PORT, async () => {
   console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
   console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
   console.log();
+  
+  // Test /tmp/ write access
+  const testLog = `/tmp/backend_test_${Date.now()}.log`;
+  try {
+    await fs.writeFile(testLog, `Backend started at ${new Date().toISOString()}\n`);
+    await executeShellCommand(`chmod 777 ${testLog}`);
+    console.log(`✅ /tmp/ directory is writable (test file: ${testLog})`);
+  } catch (err) {
+    console.error(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`);
+  }
   
   // Automatically check and configure passwordless sudo
   console.log('🔐 Checking passwordless sudo configuration...');

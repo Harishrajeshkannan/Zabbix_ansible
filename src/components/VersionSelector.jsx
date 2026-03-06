@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fetchAgentVersions } from '../services/backendService';
 import './VersionSelector.css';
 
 const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentVersion }) => {
@@ -24,7 +25,6 @@ const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentV
   const fetchVersions = async () => {
     setLoading(true);
     try {
-      const { fetchAgentVersions } = await import('../services/backendService');
       const data = await fetchAgentVersions();
       setVersions(data.versions || []);
       if (data.versions && data.versions.length > 0) {
