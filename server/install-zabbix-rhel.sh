@@ -175,7 +175,7 @@ add_zabbix_repo() {
     fi
     
     # Build repository URL
-    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION${STABLE_PATH}/rhel/$RHEL_VERSION/x86_64/zabbix-release-$MAJOR_VERSION-1.el$RHEL_VERSION.noarch.rpm"
+    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION${STABLE_PATH}/rhel/$RHEL_VERSION/x86_64/zabbix-agent2-$MAJOR_VERSION-1.el$RHEL_VERSION.rpm"
     
     print_info "Repository URL: $REPO_URL"
     
