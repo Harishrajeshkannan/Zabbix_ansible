@@ -144,9 +144,10 @@ install_prerequisites() {
     print_section "Installing Prerequisites"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing prerequisites..."
     
-    print_info "Updating package cache..."
-    $PKG_MGR update -y
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache updated"
+    # Skip full system upgrade to avoid disk space issues
+    # print_info "Updating package cache..."
+    # $PKG_MGR update -y
+    # echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache updated"
     
     print_info "Installing required packages (wget, curl, rpm)..."
     $PKG_MGR install -y wget curl rpm
