@@ -158,135 +158,80 @@ install_prerequisites() {
 add_zabbix_repo() {
     local version="$1"
     
-    print_section "Adding Zabbix Repository"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuring Zabbix repository for version $version..."
+    print_section "Downloading Zabbix Agent Package"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Preparing to download Zabbix Agent 2 version $version..."
     
-    # Extract major.minor version
+    # Extract major.minor version (e.g., 7.4 from 7.4.7)
     MAJOR_VERSION=$(echo "$version" | cut -d. -f1-2)
     
-    # Determine if /stable/ path should be used (7.2+ versions use it, earlier don't)
-    MAJOR_NUM=$(echo "$MAJOR_VERSION" | awk '{print $1}')
-    if awk "BEGIN {exit !($MAJOR_NUM >= 7.2)}"; then
-        STABLE_PATH="/stable"
-        print_info "Version $MAJOR_NUM uses /stable/ repository path"
-    else
-        STABLE_PATH=""
-        print_info "Version $MAJOR_NUM uses legacy repository path"
-    fi
+    # Build agent package URL
+    # Format: https://repo.zabbix.com/zabbix/7.4/stable/rhel/8/x86_64/zabbix-agent2-7.4.7-release1.el8.x86_64.rpm
+    AGENT_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION/stable/rhel/$RHEL_VERSION/x86_64/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
     
-    # Build repository URL
-    REPO_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION${STABLE_PATH}/rhel/$RHEL_VERSION/x86_64/zabbix-agent2-$MAJOR_VERSION-1.el$RHEL_VERSION.rpm"
+    print_info "Agent package URL: $AGENT_URL"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download URL: $AGENT_URL"
     
-    print_info "Repository URL: $REPO_URL"
+    # Create temporary download directory
+    TEMP_DIR="/tmp/zabbix_agent_download_$$"
+    mkdir -p "$TEMP_DIR"
+    AGENT_RPM="$TEMP_DIR/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
     
-    # Check if repository is already installed
-    if rpm -qa | grep -q "zabbix-release-$MAJOR_VERSION"; then
-        print_info "Zabbix repository $MAJOR_VERSION already installed"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Repository already present, skipping installation"
-    else
-        print_info "Installing Zabbix repository..."
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading repository package from: $REPO_URL"
-        if rpm -Uvh "$REPO_URL"; then
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Repository package installed successfully"
+    print_info "Downloading agent package..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading to: $AGENT_RPM"
+    
+    if curl -f -L -o "$AGENT_RPM" "$AGENT_URL"; then
+        print_success "Agent package downloaded successfully"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download completed: $(ls -lh "$AGENT_RPM" | awk '{print $5}')"
+        
+        print_info "Installing Zabbix Agent 2..."
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing from: $AGENT_RPM"
+        
+        if rpm -Uvh "$AGENT_RPM"; then
+            print_success "Zabbix Agent 2 installed successfully"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation completed"
+            rm -rf "$TEMP_DIR"
+            return 0
         else
-            print_error "Failed to install Zabbix repository"
-            print_error "Please check if version $version is available for RHEL $RHEL_VERSION"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Repository installation FAILED"
+            print_error "Failed to install Zabbix Agent 2 package"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation FAILED"
+            rm -rf "$TEMP_DIR"
             exit 1
         fi
+    else
+        print_error "Failed to download Zabbix Agent 2 package"
+        print_error "URL: $AGENT_URL"
+        print_error "Please check if version $version is available for RHEL $RHEL_VERSION"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download FAILED"
+        rm -rf "$TEMP_DIR"
+        exit 1
     fi
-    
-    # Clean package cache
-    print_info "Cleaning package cache..."
-    $PKG_MGR clean all
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache cleaned"
 }
 
-# Function to install Zabbix Agent 2
+# Function to verify Zabbix Agent 2 installation
 install_zabbix_agent() {
     local version="$1"
     
-    print_section "Installing Zabbix Agent 2"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Zabbix Agent 2 installation..."
+    print_section "Verifying Zabbix Agent 2 Installation"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Verifying Zabbix Agent 2 installation..."
     
-    # Check if already installed
+    # Check if agent is installed
     if rpm -qa | grep -q zabbix-agent2; then
         INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
-        print_warning "Zabbix Agent 2 already installed: $INSTALLED_VERSION"
-        print_info "Proceeding with reinstall/update..."
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Existing version: $INSTALLED_VERSION"
-    fi
-    
-    print_info "Installing Zabbix Agent 2 version ${version}..."
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Requested version: ${version}"
-    
-    # Check if RPM file was pre-downloaded
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    DOWNLOADS_DIR="${SCRIPT_DIR}/downloads"
-    
-    # Look for downloaded RPM matching the version
-    DOWNLOADED_RPM=""
-    if [ -d "$DOWNLOADS_DIR" ]; then
-        DOWNLOADED_RPM=$(find "$DOWNLOADS_DIR" -name "zabbix-agent2-${version}*.rpm" -type f 2>/dev/null | head -1)
-    fi
-    
-    # Install from downloaded RPM if available, otherwise use repository
-    if [ -n "$DOWNLOADED_RPM" ] && [ -f "$DOWNLOADED_RPM" ]; then
-        print_info "Found pre-downloaded package: $(basename "$DOWNLOADED_RPM")"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package path: $DOWNLOADED_RPM"
+        print_success "Zabbix Agent 2 is installed: $INSTALLED_VERSION"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installed version: $INSTALLED_VERSION"
         
-        # Make RPM package executable
-        print_info "Setting executable permissions on RPM package..."
-        chmod +x "$DOWNLOADED_RPM"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] RPM package permissions set to executable"
-        
-        print_info "Installing from local file..."
-        
-        if rpm -Uvh "$DOWNLOADED_RPM"; then
-            print_success "Zabbix Agent 2 installed from downloaded package"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation from local RPM successful"
-            return 0
+        # Verify the binary exists
+        if [ -f /usr/sbin/zabbix_agent2 ]; then
+            print_success "Zabbix Agent 2 binary found: /usr/sbin/zabbix_agent2"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Binary verified at /usr/sbin/zabbix_agent2"
         else
-            print_warning "Failed to install from downloaded package, falling back to repository..."
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Local RPM installation failed, trying repository"
+            print_error "Zabbix Agent 2 binary not found at /usr/sbin/zabbix_agent2"
+            exit 1
         fi
-    fi
-    
-    # Fall back to repository installation  
-    print_info "Installing from Zabbix repository..."
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting repository installation with DNF"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Available repositories:"
-    dnf repolist 2>/dev/null | grep -i zabbix || echo "No Zabbix repositories found"
-    
-    # Try exact version match first
-    print_info "Trying exact version match: zabbix-agent2-${version}"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: dnf install -y zabbix-agent2-${version}"
-    if $PKG_MGR install -y "zabbix-agent2-${version}"; then
-        print_success "Zabbix Agent 2 version ${version} installed successfully"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Exact version match installation successful"
     else
-        # Try with wildcard for release variants (release1, release2, etc.)
-        print_info "Trying with version wildcard: zabbix-agent2-${version}*"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting wildcard match"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: dnf install -y zabbix-agent2-${version}*"
-        if $PKG_MGR install -y zabbix-agent2-${version}*; then
-            print_success "Zabbix Agent 2 installed successfully"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Wildcard version installation successful"
-        else
-            # Last resort: install latest available
-            print_warning "Specific version not available, installing latest from repository..."
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Attempting latest available version"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: dnf install -y zabbix-agent2"
-            if $PKG_MGR install -y zabbix-agent2; then
-                INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
-                print_warning "Installed: $INSTALLED_VERSION (may differ from requested $version)"
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Latest version installation successful: $INSTALLED_VERSION"
-            else
-                print_error "Failed to install Zabbix Agent 2"
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] All installation attempts failed"
-                exit 1
-            fi
-        fi
+        print_error "Zabbix Agent 2 is not installed"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation verification FAILED"
+        exit 1
     fi
 }
 
