@@ -324,27 +324,27 @@ start_zabbix_service() {
     
     # Enable service
     print_info "Enabling Zabbix Agent 2 service..."
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: systemctl enable zabbix-agent2"
-    systemctl enable zabbix-agent2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: sudo systemctl enable zabbix-agent2"
+    sudo systemctl enable zabbix-agent2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service enabled for auto-start on boot"
     
     # Start/restart service
     print_info "Starting Zabbix Agent 2 service..."
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: systemctl restart zabbix-agent2"
-    systemctl restart zabbix-agent2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: sudo systemctl restart zabbix-agent2"
+    sudo systemctl restart zabbix-agent2
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service restart command issued"
     
     # Wait for service to start
     sleep 3
     
     # Check service status
-    if systemctl is-active --quiet zabbix-agent2; then
+    if sudo systemctl is-active --quiet zabbix-agent2; then
         print_success "Zabbix Agent 2 service is running"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service status: ACTIVE"
         
         # Show detailed status
         echo ""
-        systemctl status zabbix-agent2 --no-pager -l
+        sudo systemctl status zabbix-agent2 --no-pager -l
     else
         print_error "Zabbix Agent 2 service failed to start"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service status: FAILED"
@@ -352,10 +352,10 @@ start_zabbix_service() {
         # Show error details
         echo ""
         print_error "Service status:"
-        systemctl status zabbix-agent2 --no-pager -l
+        sudo systemctl status zabbix-agent2 --no-pager -l
         
         print_error "Recent logs:"
-        journalctl -u zabbix-agent2 --no-pager -n 20
+        sudo journalctl -u zabbix-agent2 --no-pager -n 20
         
         exit 1
     fi
@@ -363,29 +363,11 @@ start_zabbix_service() {
 
 # Function to configure firewall
 configure_firewall() {
-    print_section "Configuring Firewall"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Checking firewall configuration..."
-    
-    if systemctl is-active --quiet firewalld; then
-        print_info "Configuring firewalld..."
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Adding firewall rule for port $DEFAULT_LISTEN_PORT/tcp"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp"
-        
-        # Add Zabbix agent port
-        firewall-cmd --permanent --add-port=$DEFAULT_LISTEN_PORT/tcp
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Reloading firewall..."
-        firewall-cmd --reload
-        
-        print_success "Firewall configured to allow Zabbix agent port $DEFAULT_LISTEN_PORT"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Firewall rule added and reloaded"
-    elif systemctl is-enabled --quiet iptables 2>/dev/null; then
-        print_warning "iptables detected but automatic configuration not implemented"
-        print_info "Please manually allow port $DEFAULT_LISTEN_PORT/tcp in your iptables rules"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] iptables detected - manual configuration required"
-    else
-        print_info "No active firewall detected or firewall management not needed"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] No firewall configuration needed"
-    fi
+    print_section "Firewall Configuration"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Skipping firewall configuration..."
+    print_info "Firewall port configuration skipped (port $DEFAULT_LISTEN_PORT/tcp)"
+    print_info "Note: Zabbix server must be able to reach this agent on port $DEFAULT_LISTEN_PORT"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Firewall configuration skipped as per configuration"
 }
 
 # Function to display installation summary
