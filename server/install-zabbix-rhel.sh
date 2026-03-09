@@ -174,14 +174,26 @@ add_zabbix_repo() {
     # Create temporary download directory
     TEMP_DIR="/tmp/zabbix_agent_download_$$"
     mkdir -p "$TEMP_DIR"
+    sudo chmod 777 "$TEMP_DIR"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Created temp directory: $TEMP_DIR with 777 permissions"
     AGENT_RPM="$TEMP_DIR/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
     
     print_info "Downloading agent package..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading to: $AGENT_RPM"
     
     if curl -f -L -o "$AGENT_RPM" "$AGENT_URL"; then
+        sudo chmod 777 "$AGENT_RPM"
         print_success "Agent package downloaded successfully"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download completed: $(ls -lh "$AGENT_RPM" | awk '{print $5}')"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] File permissions set to 777"
+        
+        # Check if exact version is already installed
+        if rpm -q "zabbix-agent2-$version-release1.el$RHEL_VERSION" >/dev/null 2>&1; then
+            print_info "Zabbix Agent 2 version $version is already installed"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package already installed, skipping installation"
+            sudo rm -rf "$TEMP_DIR"
+            return 0
+        fi
         
         print_info "Installing Zabbix Agent 2..."
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing from: $AGENT_RPM"
@@ -189,12 +201,12 @@ add_zabbix_repo() {
         if rpm -Uvh "$AGENT_RPM"; then
             print_success "Zabbix Agent 2 installed successfully"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation completed"
-            rm -rf "$TEMP_DIR"
+            sudo rm -rf "$TEMP_DIR"
             return 0
         else
             print_error "Failed to install Zabbix Agent 2 package"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation FAILED"
-            rm -rf "$TEMP_DIR"
+            sudo rm -rf "$TEMP_DIR"
             exit 1
         fi
     else
@@ -202,7 +214,7 @@ add_zabbix_repo() {
         print_error "URL: $AGENT_URL"
         print_error "Please check if version $version is available for RHEL $RHEL_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download FAILED"
-        rm -rf "$TEMP_DIR"
+        sudo rm -rf "$TEMP_DIR"
         exit 1
     fi
 }
