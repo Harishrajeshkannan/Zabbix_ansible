@@ -187,18 +187,34 @@ add_zabbix_repo() {
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download completed: $(ls -lh "$AGENT_RPM" | awk '{print $5}')"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] File permissions set to 777"
         
-        # Check if exact version is already installed
-        if rpm -q "zabbix-agent2-$version-release1.el$RHEL_VERSION" >/dev/null 2>&1; then
-            print_info "Zabbix Agent 2 version $version is already installed"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package already installed, skipping installation"
-            sudo rm -rf "$TEMP_DIR"
-            return 0
+        # Check if any version of zabbix-agent2 is already installed
+        if rpm -q zabbix-agent2 >/dev/null 2>&1; then
+            INSTALLED_VERSION=$(rpm -q zabbix-agent2)
+            print_info "Zabbix Agent 2 is already installed: $INSTALLED_VERSION"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installed version: $INSTALLED_VERSION"
+            
+            # Check if it's the exact version requested
+            if rpm -q "zabbix-agent2-$version-release1.el$RHEL_VERSION" >/dev/null 2>&1; then
+                print_info "Requested version $version is already installed, skipping installation"
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package version matches, skipping installation"
+                sudo rm -rf "$TEMP_DIR"
+                return 0
+            else
+                print_info "Different version detected, upgrading/downgrading..."
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Replacing $INSTALLED_VERSION with $version"
+                RPM_FLAGS="--oldpackage --replacepkgs"
+            fi
+        else
+            print_info "No existing installation found"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Fresh installation"
+            RPM_FLAGS=""
         fi
         
         print_info "Installing Zabbix Agent 2..."
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing from: $AGENT_RPM"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] RPM flags: $RPM_FLAGS"
         
-        if rpm -Uvh "$AGENT_RPM"; then
+        if rpm -Uvh $RPM_FLAGS "$AGENT_RPM"; then
             print_success "Zabbix Agent 2 installed successfully"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation completed"
             sudo rm -rf "$TEMP_DIR"
