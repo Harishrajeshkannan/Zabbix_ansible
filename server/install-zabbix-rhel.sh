@@ -486,8 +486,8 @@ main() {
     install_prerequisites
     add_zabbix_repo "$VERSION"
     install_zabbix_agent "$VERSION"
-    configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
-    validate_configuration
+    # configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
+    # validate_configuration
     start_zabbix_service
     configure_firewall
     
