@@ -275,23 +275,23 @@ configure_zabbix_agent() {
     # Backup original configuration
     if [ ! -f /etc/zabbix/zabbix_agent2.conf.backup ]; then
         print_info "Creating backup of original configuration..."
-        cp /etc/zabbix/zabbix_agent2.conf /etc/zabbix/zabbix_agent2.conf.backup
+        sudo cp /etc/zabbix/zabbix_agent2.conf /etc/zabbix/zabbix_agent2.conf.backup
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration backup created"
     fi
     
     # Configure basic settings
-    print_info "Configuring basic settings..."
+    print_info "Configuring minimal settings..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Server: $server_ip | Port: $server_port | Hostname: $hostname"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Modifying configuration file: /etc/zabbix/zabbix_agent2.conf"
-    sed -i "s/^Server=.*/Server=$server_ip/" /etc/zabbix/zabbix_agent2.conf
+    sudo sed -i "s/^Server=.*/Server=$server_ip/" /etc/zabbix/zabbix_agent2.conf
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set Server=$server_ip"
-    sed -i "s/^ServerActive=.*/ServerActive=$server_ip:$server_port/" /etc/zabbix/zabbix_agent2.conf
+    sudo sed -i "s/^ServerActive=.*/ServerActive=$server_ip:$server_port/" /etc/zabbix/zabbix_agent2.conf
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ServerActive=$server_ip:$server_port"
-    sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
+    sudo sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set Hostname=$hostname"
-    sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
+    sudo sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ListenPort=$DEFAULT_LISTEN_PORT"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Basic configuration applied"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Minimal configuration applied"
     
     print_info "Using unencrypted connection (no PSK)"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration uses plaintext communication"
@@ -306,7 +306,7 @@ validate_configuration() {
     
     print_info "Testing configuration syntax..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Running: zabbix_agent2 -t zabbix.agent.ping"
-    if su -s /bin/bash zabbix -c 'zabbix_agent2 -t zabbix.agent.ping'; then
+    if sudo su -s /bin/bash zabbix -c 'zabbix_agent2 -t zabbix.agent.ping'; then
         print_success "Configuration validation passed"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Configuration validated successfully"
     else
@@ -486,8 +486,8 @@ main() {
     install_prerequisites
     add_zabbix_repo "$VERSION"
     install_zabbix_agent "$VERSION"
-    # configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
-    # validate_configuration
+    configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
+    validate_configuration
     start_zabbix_service
     configure_firewall
     
