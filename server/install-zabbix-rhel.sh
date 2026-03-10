@@ -242,9 +242,12 @@ install_zabbix_agent() {
     print_section "Verifying Zabbix Agent 2 Installation"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Verifying Zabbix Agent 2 installation..."
     
-    # Check if agent is installed
-    if rpm -qa | grep -q zabbix-agent2; then
-        INSTALLED_VERSION=$(rpm -qa | grep zabbix-agent2 | head -1)
+    # Give RPM database a moment to update
+    sleep 1
+    
+    # Check if agent package is installed using rpm -q
+    if rpm -q zabbix-agent2 >/dev/null 2>&1; then
+        INSTALLED_VERSION=$(rpm -q zabbix-agent2)
         print_success "Zabbix Agent 2 is installed: $INSTALLED_VERSION"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installed version: $INSTALLED_VERSION"
         
@@ -257,7 +260,9 @@ install_zabbix_agent() {
             exit 1
         fi
     else
-        print_error "Zabbix Agent 2 is not installed"
+        print_error "Zabbix Agent 2 package not found in RPM database"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Checking all zabbix packages:"
+        rpm -qa | grep zabbix || echo "No zabbix packages found"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation verification FAILED"
         exit 1
     fi
