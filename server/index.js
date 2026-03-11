@@ -216,62 +216,20 @@ app.post('/api/log-action', async (req, res) => {
  */
 app.get('/api/logs', async (req, res) => {
   try {
+    const result = await executeShellCommand(`find "${LOGS_DIR}" -type f -name "*.txt" -printf "%f %s %T@\\n" 2>/dev/null | head -100`);
+    
     const logs = [];
-    
-    // Get logs from server/agent-logs directory (deployment logs)
-    try {
-      const agentLogsResult = await executeShellCommand(`find "${LOGS_DIR}" -type f -name "*.txt" 2>/dev/null | head -100`);
-      if (agentLogsResult.stdout.trim()) {
-        const agentLogFiles = agentLogsResult.stdout.trim().split('\n');
-        for (const filepath of agentLogFiles) {
-          try {
-            const statResult = await executeShellCommand(`stat -c "%s %Y" "${filepath}" 2>/dev/null`);
-            if (statResult.stdout.trim()) {
-              const [size, mtime] = statResult.stdout.trim().split(' ');
-              const name = path.basename(filepath);
-              logs.push({ 
-                Name: name, 
-                Length: parseInt(size), 
-                LastWriteTime: new Date(parseInt(mtime) * 1000).toISOString() 
-              });
-            }
-          } catch (e) {
-            console.error(`Error getting stats for ${filepath}:`, e.message);
-          }
+    if (result.stdout.trim()) {
+      result.stdout.trim().split('\n').forEach(line => {
+        const parts = line.split(' ');
+        if (parts.length >= 3) {
+          const name = parts[0];
+          const size = parseInt(parts[1]);
+          const timestamp = new Date(parseFloat(parts[2]) * 1000).toISOString();
+          logs.push({ Name: name, Length: size, LastWriteTime: timestamp });
         }
-      }
-    } catch (error) {
-      console.error('Error listing agent logs:', error.message);
+      });
     }
-    
-    // Get installation logs from /tmp directory (RHEL installation logs)
-    try {
-      const tmpLogsResult = await executeShellCommand(`find /tmp -maxdepth 1 -type f -name "zabbix_install_*.log" 2>/dev/null | head -100`);
-      if (tmpLogsResult.stdout.trim()) {
-        const tmpLogFiles = tmpLogsResult.stdout.trim().split('\n');
-        for (const filepath of tmpLogFiles) {
-          try {
-            const statResult = await executeShellCommand(`stat -c "%s %Y" "${filepath}" 2>/dev/null`);
-            if (statResult.stdout.trim()) {
-              const [size, mtime] = statResult.stdout.trim().split(' ');
-              const name = path.basename(filepath);
-              logs.push({ 
-                Name: name, 
-                Length: parseInt(size), 
-                LastWriteTime: new Date(parseInt(mtime) * 1000).toISOString() 
-              });
-            }
-          } catch (e) {
-            console.error(`Error getting stats for ${filepath}:`, e.message);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error listing /tmp logs:', error.message);
-    }
-    
-    // Sort logs by date (newest first)
-    logs.sort((a, b) => new Date(b.LastWriteTime) - new Date(a.LastWriteTime));
     
     res.json({ logs });
   } catch (error) {
@@ -286,21 +244,14 @@ app.get('/api/logs', async (req, res) => {
 app.get('/api/logs/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
+    const filepath = path.join(LOGS_DIR, filename);
     
     // Security check: ensure filename doesn't contain path traversal
     if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
       return res.status(400).json({ error: 'Invalid filename' });
     }
     
-    // Try to read from agent-logs directory first
-    let filepath = path.join(LOGS_DIR, filename);
-    let result = await executeShellCommand(`test -f "${filepath}" && cat "${filepath}"`);
-    
-    // If not found, try /tmp directory (for installation logs)
-    if (!result.success || !result.stdout) {
-      filepath = `/tmp/${filename}`;
-      result = await executeShellCommand(`test -f "${filepath}" && cat "${filepath}"`);
-    }
+    const result = await executeShellCommand(`test -f "${filepath}" && cat "${filepath}"`);
     
     if (result.success && result.stdout) {
       res.json({ 
