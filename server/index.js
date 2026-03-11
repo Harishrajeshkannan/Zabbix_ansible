@@ -319,8 +319,6 @@ app.get('/api/logs/:filename', async (req, res) => {
     });
   }
 });
-  }
-});
 
 /**
  * Get available Zabbix agent versions for RHEL from official Zabbix repository
