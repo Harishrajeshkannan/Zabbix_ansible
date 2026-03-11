@@ -141,8 +141,8 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
-// Logs directory - create in project root
-const LOGS_DIR = path.join(__dirname, 'agent-logs');
+// Logs directory - in project root (parent directory of server)
+const LOGS_DIR = path.join(__dirname, '..', 'agent-logs');
 
 /**
  * Create log file using shell command
