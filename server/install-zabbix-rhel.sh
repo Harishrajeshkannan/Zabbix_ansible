@@ -386,7 +386,7 @@ show_summary() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Generating installation summary..."
     
     echo ""
-    echo "🎉 Zabbix Agent 2 $version has been successfully installed and configured!"
+    echo " Zabbix Agent 2 $version has been successfully installed and configured!"
     echo ""
     echo "Configuration Details:"
     echo "  • Hostname: $hostname"
