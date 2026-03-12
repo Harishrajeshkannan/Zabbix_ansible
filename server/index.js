@@ -628,10 +628,11 @@ app.post('/api/install-remote', async (req, res) => {
     
     // Execute installation on remote server with sudo password
     // Use echo with -S flag to pass password to sudo via stdin
+    // Use 'sudo bash script.sh' instead of 'sudo script.sh' to avoid sudoers restrictions on script paths
     const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
-    const installCommand = `echo '${escapedPassword}' | sudo -S ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
+    const installCommand = `echo '${escapedPassword}' | sudo -S bash ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo -S ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
+    console.log(`[SSH-INSTALL] sudo -S bash ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
     
     let result;
     try {
