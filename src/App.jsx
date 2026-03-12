@@ -195,33 +195,38 @@ function App() {
   const handleInstall = async (host) => {
     // Open SSH install modal for all hosts
     setSelectedHost(host);
+    setActionType('install');
     setLocalInstallModalOpen(true);
   };
 
   const handleLocalInstall = async (installData) => {
-    const toastId = toast.loading(`Installing Zabbix Agent on ${installData.host} via SSH...`);
+    const action = actionType || 'install';
+    const actionVerb = action === 'install' ? 'Installing' : 'Updating';
+    const actionPastTense = action === 'install' ? 'installed' : 'updated';
+    
+    const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via SSH...`);
     
     try {
       await installRemoteAgent(installData);
       
-      toast.success(`Zabbix Agent installed successfully on ${installData.host}!`, { id: toastId });
+      toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
       
-      // Reload data to reflect the installation
+      // Reload data to reflect the installation/update
       setTimeout(() => {
         loadData();
       }, 2000);
       
     } catch (error) {
-      toast.error(`Installation failed: ${error.message}`, { id: toastId });
+      toast.error(`${action === 'install' ? 'Installation' : 'Update'} failed: ${error.message}`, { id: toastId });
       throw error;
     }
   };
 
   const handleUpdate = async (host) => {
-    // Open version selector modal
+    // Open SSH install modal for update (reuse same modal)
     setSelectedHost(host);
     setActionType('update');
-    setVersionSelectorOpen(true);
+    setLocalInstallModalOpen(true);
   };
 
   const handleVersionSelected = async (selectedVersionOrData) => {
@@ -390,7 +395,7 @@ function App() {
         )}
       </main>
 
-      {/* SSH Install Modal */}
+      {/* SSH Install/Update Modal */}
       <LocalInstallModal
         isOpen={localInstallModalOpen}
         onClose={() => setLocalInstallModalOpen(false)}
@@ -398,6 +403,7 @@ function App() {
         availableVersions={availableVersions}
         latestVersion={latestVersion}
         selectedHost={selectedHost}
+        action={actionType}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './LocalInstallModal.css';
 
-const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost }) => {
+const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost, action = 'install' }) => {
   const [formData, setFormData] = useState({
     host: selectedHost?.hostname || '',
     sshPort: '22',
@@ -23,10 +23,14 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
       setFormData(prev => ({
         ...prev,
         host: selectedHost.hostname || '',
-        hostname: selectedHost.hostname || ''
+        hostname: selectedHost.hostname || '',
+        // Pre-fill version with current version for updates
+        version: action === 'update' && selectedHost.agentVersion 
+          ? selectedHost.agentVersion 
+          : latestVersion
       }));
     }
-  }, [selectedHost]);
+  }, [selectedHost, action, latestVersion]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -59,13 +63,18 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Install Zabbix Agent via SSH</h2>
+          <h2>{action === 'update' ? 'Update' : 'Install'} Zabbix Agent via SSH</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         
         <form onSubmit={handleSubmit} className="install-form">
           <div className="form-section">
             <h3>SSH Connection</h3>
+            {action === 'update' && selectedHost?.agentVersion && (
+              <div className="update-info" style={{ marginBottom: '15px', padding: '10px', background: '#e3f2fd', borderRadius: '4px' }}>
+                <strong>Current Version:</strong> {selectedHost.agentVersion}
+              </div>
+            )}
             
             <div className="form-group">
               <label htmlFor="host">Remote Server IP/Hostname *</label>
@@ -222,14 +231,14 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           )}
 
           <div className="form-info">
-            <strong>Installation Process:</strong>
+            <strong>{action === 'update' ? 'Update' : 'Installation'} Process:</strong>
             <ul>
               <li>Connect to remote server via SSH</li>
               <li>Download Zabbix Agent RPM package</li>
-              <li>Install zabbix-agent2 via DNF</li>
+              <li>{action === 'update' ? 'Update' : 'Install'} zabbix-agent2 via DNF</li>
               <li>Configure agent with server details</li>
               <li>Enable and start zabbix-agent2 service</li>
-              <li>Retrieve installation logs</li>
+              <li>Retrieve {action === 'update' ? 'update' : 'installation'} logs</li>
             </ul>
             <div style={{ marginTop: '10px', padding: '10px', background: '#fff3cd', borderRadius: '4px', fontSize: '0.9em' }}>
               <strong>⚠️ Requirements:</strong>
@@ -247,7 +256,9 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               Cancel
             </button>
             <button type="submit" className="btn-install" disabled={installing}>
-              {installing ? 'Installing...' : 'Install Agent'}
+              {installing 
+                ? (action === 'update' ? 'Updating...' : 'Installing...') 
+                : (action === 'update' ? 'Update Agent' : 'Install Agent')}
             </button>
           </div>
         </form>
