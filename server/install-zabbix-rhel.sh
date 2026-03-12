@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Zabbix Agent 2 Installation Script for RHEL/CentOS/Rocky/AlmaLinux
 # This script must be run with sudo/root privileges
 # Usage: sudo ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]
@@ -9,7 +9,7 @@
 #
 # Version, Server IP, and Hostname are required. Server Port defaults to 10051.
 
-set -euo pipefail
+set -eu
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,33 +31,42 @@ touch "$LOG_FILE"
 chmod 777 "$LOG_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation log started" >> "$LOG_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG_FILE (permissions: 777)" >> "$LOG_FILE"
-# Redirect all output to log file
-exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] =========================================="
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Zabbix Agent Installation Started"
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG_FILE"
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] =========================================="
+# Helper function for dual logging (stdout + file)
+log_output() {
+    echo "$1"
+    echo "$1" >> "$LOG_FILE"
+}
+
+log_output "[$(date '+%Y-%m-%d %H:%M:%S')] =========================================="
+log_output "[$(date '+%Y-%m-%d %H:%M:%S')] Zabbix Agent Installation Started"
+log_output "[$(date '+%Y-%m-%d %H:%M:%S')] Log file: $LOG_FILE"
+log_output "[$(date '+%Y-%m-%d %H:%M:%S')] =========================================="
 
 # Function to print colored output
 print_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    printf "${BLUE}[INFO]${NC} %s\n" "$1"
+    printf "[INFO] %s\n" "$1" >> "$LOG_FILE"
 }
 
 print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    printf "${GREEN}[SUCCESS]${NC} %s\n" "$1"
+    printf "[SUCCESS] %s\n" "$1" >> "$LOG_FILE"
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    printf "${YELLOW}[WARNING]${NC} %s\n" "$1"
+    printf "[WARNING] %s\n" "$1" >> "$LOG_FILE"
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf "${RED}[ERROR]${NC} %s\n" "$1"
+    printf "[ERROR] %s\n" "$1" >> "$LOG_FILE"
 }
 
 print_section() {
-    echo -e "${CYAN}== $1 ==${NC}"
+    printf "${CYAN}== %s ==${NC}\n" "$1"
+    printf "== %s ==\n" "$1" >> "$LOG_FILE"
 }
 
 # Function to check if command exists
@@ -68,14 +77,20 @@ command_exists() {
 # Function to validate IP address
 validate_ip() {
     local ip="$1"
-    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        return 0
-    elif [[ $ip =~ ^[a-zA-Z0-9.-]+$ ]]; then
-        # Allow hostnames/FQDNs
-        return 0
-    else
-        return 1
-    fi
+    # Basic validation - check if it contains only valid characters
+    case "$ip" in
+        *[!0-9.]*)
+            # Contains non-numeric/dot chars, might be hostname - allow alphanumeric, dots, hyphens
+            case "$ip" in
+                *[!a-zA-Z0-9.-]*) return 1 ;;
+                *) return 0 ;;
+            esac
+            ;;
+        *)
+            # Numeric/dots only - basic IP format check
+            return 0
+            ;;
+    esac
 }
 
 # Function to test connectivity
@@ -85,13 +100,19 @@ test_connectivity() {
     
     print_info "Testing connectivity to $server:$port..."
     
-    if timeout 10 bash -c "</dev/tcp/$server/$port"; then
-        print_success "Successfully connected to $server:$port"
-        return 0
+    # Use nc (netcat) if available, otherwise skip test
+    if command_exists nc; then
+        if timeout 10 nc -z -w 5 "$server" "$port" 2>/dev/null; then
+            print_success "Successfully connected to $server:$port"
+            return 0
+        else
+            print_warning "Cannot connect to $server:$port"
+            print_warning "Please ensure the server is accessible and port $port is open"
+            return 1
+        fi
     else
-        print_warning "Cannot connect to $server:$port"
-        print_warning "Please ensure the server is accessible and port $port is open"
-        return 1
+        print_warning "nc (netcat) not available, skipping connectivity test"
+        return 0
     fi
 }
 
