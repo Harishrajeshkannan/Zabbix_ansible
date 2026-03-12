@@ -11,7 +11,7 @@ import VersionSelector from './components/VersionSelector';
 import LocalInstallModal from './components/LocalInstallModal';
 import LogsPage from './pages/LogsPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
-import { logAgentAction, downloadAgentPackage, installLocalhostAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -193,26 +193,18 @@ function App() {
 
   // Action handlers
   const handleInstall = async (host) => {
-    // Check if localhost - open local install modal
-    if (host.hostname.toLowerCase() === 'localhost') {
-      setSelectedHost(host);
-      setLocalInstallModalOpen(true);
-      return;
-    }
-    
-    // Open version selector modal for remote hosts
+    // Open SSH install modal for all hosts
     setSelectedHost(host);
-    setActionType('install');
-    setVersionSelectorOpen(true);
+    setLocalInstallModalOpen(true);
   };
 
   const handleLocalInstall = async (installData) => {
-    const toastId = toast.loading('Installing Zabbix Agent on local RHEL server...');
+    const toastId = toast.loading(`Installing Zabbix Agent on ${installData.host} via SSH...`);
     
     try {
-      await installLocalhostAgent(installData);
+      await installRemoteAgent(installData);
       
-      toast.success('Zabbix Agent installed successfully on RHEL server!', { id: toastId });
+      toast.success(`Zabbix Agent installed successfully on ${installData.host}!`, { id: toastId });
       
       // Reload data to reflect the installation
       setTimeout(() => {
@@ -398,13 +390,14 @@ function App() {
         )}
       </main>
 
-      {/* Local Install Modal */}
+      {/* SSH Install Modal */}
       <LocalInstallModal
         isOpen={localInstallModalOpen}
         onClose={() => setLocalInstallModalOpen(false)}
         onInstall={handleLocalInstall}
         availableVersions={availableVersions}
         latestVersion={latestVersion}
+        selectedHost={selectedHost}
       />
     </div>
   );

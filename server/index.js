@@ -5,65 +5,13 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
-import fsSync from 'fs';
-import process from 'process';
+import { Client as SSHClient } from 'ssh2';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ============= HELPER FUNCTIONS =============
-
-/**
- * Check if passwordless sudo is configured for the installation script
- */
-async function checkPasswordlessSudo() {
-  try {
-    const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
-    // Try to run sudo with -n (non-interactive) flag
-    const result = await executeShellCommand(`sudo -n "${scriptPath}" 2>&1 || true`);
-    
-    // If we get "Insufficient arguments" error, passwordless sudo is working
-    // If we get "password required", it's not configured
-    if (result.stdout.includes('Insufficient arguments') || result.stdout.includes('USAGE:')) {
-      return true; // Passwordless sudo is configured
-    }
-    return false; // Passwordless sudo not configured
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Automatically configure passwordless sudo by running setup-sudo.sh
- */
-async function setupPasswordlessSudo() {
-  try {
-    const setupScript = path.join(__dirname, 'setup-sudo.sh');
-    console.log('🔧 Configuring passwordless sudo automatically...');
-    console.log(`   Running: ${setupScript}`);
-    
-    // Make setup script executable with 755 permissions
-    await executeShellCommand(`chmod 755 "${setupScript}"`);
-    console.log('   Setup script permissions: 755 (rwxr-xr-x)');
-    
-    // Run setup script with sudo (user may be prompted for password once)
-    const result = await executeShellCommand(`sudo bash "${setupScript}"`, { timeout: 30000 });
-    
-    if (result.success || result.stdout.includes('Setup Complete')) {
-      console.log('✅ Passwordless sudo configured successfully\n');
-      return true;
-    } else {
-      console.error('❌ Failed to configure passwordless sudo');
-      console.error('   Output:', result.stdout);
-      console.error('   Error:', result.stderr);
-      return false;
-    }
-  } catch (error) {
-    console.error('❌ Error during sudo setup:', error.message);
-    return false;
-  }
-}
 
 /**
  * Execute shell command with proper error handling
@@ -130,6 +78,75 @@ function parseInstallError(output) {
     error: 'Installation failed',
     details: output.substring(0, 500)
   };
+}
+
+/**
+ * Execute command on remote server via SSH
+ */
+async function executeSSHCommand(conn, command) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    
+    conn.exec(command, (err, stream) => {
+      if (err) return reject(err);
+      
+      stream.on('close', (code) => {
+        resolve({ stdout, stderr, code, success: code === 0 });
+      }).on('data', (data) => {
+        stdout += data.toString();
+      }).stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+    });
+  });
+}
+
+/**
+ * Upload file to remote server via SFTP
+ */
+async function uploadFileSSH(conn, localPath, remotePath) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+      
+      sftp.fastPut(localPath, remotePath, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  });
+}
+
+/**
+ * Download file from remote server via SFTP
+ */
+async function downloadFileSSH(conn, remotePath, localPath) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+      
+      sftp.fastGet(remotePath, localPath, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  });
+}
+
+/**
+ * Connect to remote server via SSH
+ */
+async function connectSSH(config) {
+  return new Promise((resolve, reject) => {
+    const conn = new SSHClient();
+    
+    conn.on('ready', () => {
+      resolve(conn);
+    }).on('error', (err) => {
+      reject(err);
+    }).connect(config);
+  });
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -494,93 +511,48 @@ app.get('/api/download-agent/:version', async (req, res) => {
 });
 
 /**
- * Install Zabbix agent on local RHEL server
- * SECURITY: Requires passwordless sudo configuration for install-zabbix-rhel.sh
- * 
- * Add to /etc/sudoers.d/zabbix-install:
- *   nodeuser ALL=(ALL) NOPASSWD: /path/to/install-zabbix-rhel.sh
+ * Install Zabbix agent on remote RHEL server via SSH
+ * Connects to remote server, uploads installation script, executes it, and retrieves logs
  */
-app.post('/api/install-localhost', async (req, res) => {
-  console.log('\n[INSTALL] ========================================');
-  console.log('[INSTALL] /api/install-localhost endpoint HIT!');
-  console.log('[INSTALL] ========================================\n');
+app.post('/api/install-remote', async (req, res) => {
+  console.log('\n[SSH-INSTALL] ========================================');
+  console.log('[SSH-INSTALL] /api/install-remote endpoint HIT!');
+  console.log('[SSH-INSTALL] ========================================\n');
+  
+  let connection = null;
   
   try {
-    // Log to file for debugging
-    const timestamp = Date.now();
-    const debugLog = `/tmp/backend_debug_${timestamp}.log`;
-    const debugInfo = [
-      `\n========== NEW INSTALLATION REQUEST ==========`,
-      `Timestamp: ${new Date().toISOString()}`,
-      `Raw request body: ${JSON.stringify(req.body, null, 2)}`,
-      `Body keys: ${Object.keys(req.body).join(', ')}`,
-    ];
+    const { 
+      host,           // Remote server IP/hostname
+      sshPort = 22,   // SSH port
+      sshUser,        // SSH username  
+      sshPassword,    // SSH password
+      version,        // Zabbix version
+      serverIP,       // Zabbix server IP
+      serverPort = 10051,  // Zabbix server port
+      hostname        // Agent hostname
+    } = req.body;
     
-    console.log('\n[INSTALL] ========== NEW INSTALLATION REQUEST ==========');
-    console.log('[INSTALL] Raw request body:', JSON.stringify(req.body, null, 2));
-    
-    const { version, serverIP, serverPort = 10051, hostname } = req.body;
-    
-    debugInfo.push(`\nExtracted values:`);
-    debugInfo.push(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
-    debugInfo.push(`  - serverIP: ${serverIP} (type: ${typeof serverIP}, truthy: ${!!serverIP})`);
-    debugInfo.push(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
-    debugInfo.push(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
-    
-    // Create debug log file with error handling
-    try {
-      await fs.writeFile(debugLog, debugInfo.join('\n'));
-      await executeShellCommand(`chmod 777 ${debugLog}`);
-      console.log(`[INSTALL] Debug log created: ${debugLog} (permissions: 777)`);
-    } catch (logErr) {
-      console.error(`[INSTALL] WARNING: Could not create debug log: ${logErr.message}`);
-      // Try synchronous write as fallback
-      try {
-        fsSync.writeFileSync(debugLog, debugInfo.join('\n'), { mode: 0o777 });
-        console.log(`[INSTALL] Debug log created (sync): ${debugLog}`);
-      } catch (syncErr) {
-        console.error(`[INSTALL] ERROR: Could not create debug log (sync): ${syncErr.message}`);
-      }
-    }
-    
-    console.log('[INSTALL] Extracted values:');
-    console.log(`  - version: ${version} (type: ${typeof version}, truthy: ${!!version})`);
-    console.log(`  - serverIP: ${serverIP} (type: ${typeof serverIP}, truthy: ${!!serverIP})`);
-    console.log(`  - serverPort: ${serverPort} (type: ${typeof serverPort}, truthy: ${!!serverPort})`);
-    console.log(`  - hostname: ${hostname} (type: ${typeof hostname}, truthy: ${!!hostname})`);
+    console.log('[SSH-INSTALL] Parameters:');
+    console.log(`  Host: ${host}:${sshPort}`);
+    console.log(`  SSH User: ${sshUser}`);
+    console.log(`  Zabbix Version: ${version}`);
+    console.log(`  Zabbix Server: ${serverIP}:${serverPort}`);
+    console.log(`  Agent Hostname: ${hostname}\n`);
     
     // Validate required fields
-    if (!version || !serverIP || !hostname) {
+    if (!host || !sshUser || !sshPassword || !version || !serverIP || !hostname) {
       return res.status(400).json({ 
         error: 'Missing required fields',
-        details: 'version, serverIP, and hostname are required'
+        details: 'host, sshUser, sshPassword, version, serverIP, and hostname are required'
       });
     }
     
-    // Check if passwordless sudo is configured before attempting installation
-    console.log('\n[INSTALL] Checking passwordless sudo configuration...');
-    const isSudoConfigured = await checkPasswordlessSudo();
-    
-    if (!isSudoConfigured) {
-      console.log('[INSTALL] Passwordless sudo not configured. Attempting automatic setup...');
-      const setupSuccess = await setupPasswordlessSudo();
-      
-      if (!setupSuccess) {
-        return res.status(403).json({
-          error: 'Passwordless sudo not configured',
-          details: 'Installation requires passwordless sudo. Please run: sudo bash server/setup-sudo.sh'
-        });
-      }
-      console.log('[INSTALL] Passwordless sudo configured successfully');
-    } else {
-      console.log('[INSTALL] Passwordless sudo is configured ✓');
-    }
-    
-    // SECURITY: Strict input validation to prevent command injection
+    // Security: Input validation
     if (!/^\d+\.\d+\.\d+$/.test(version)) {
       return res.status(400).json({
         error: 'Invalid version format',
-        details: 'Version must be in format X.Y.Z (e.g., 7.0.5)'
+        details: 'Version must be in format X.Y.Z (e.g., 7.4.6)'
       });
     }
     
@@ -605,107 +577,141 @@ app.post('/api/install-localhost', async (req, res) => {
       });
     }
     
-    console.log(`\n[INSTALL] Version: ${version}`);
-    console.log(`[INSTALL] Server: ${serverIP}:${serverPort}`);
-    console.log(`[INSTALL] Hostname: ${hostname}\n`);
+    // Connect to remote server via SSH
+    console.log(`[SSH-INSTALL] Connecting to ${host}:${sshPort}...`);
     
-    // Check platform
-    const platform = process.platform;
-    console.log(`[INSTALL] Platform: ${platform}`);
-    if (platform === 'win32') {
-      console.error(`[INSTALL] ERROR: Cannot install on Windows. This endpoint requires RHEL/Linux.`);
-      return res.status(400).json({
-        error: 'Platform not supported',
-        details: 'This installation endpoint only works on RHEL/Linux systems. Please run the backend on a RHEL server.'
+    try {
+      connection = await connectSSH({
+        host,
+        port: sshPort,
+        username: sshUser,
+        password: sshPassword
+      });
+      console.log(`[SSH-INSTALL] ✓ SSH connected successfully\n`);
+    } catch (sshErr) {
+      console.error(`[SSH-INSTALL] ✗ SSH connection failed: ${sshErr.message}`);
+      return res.status(503).json({
+        error: 'SSH connection failed',
+        details: `Cannot connect to ${host}:${sshPort} - ${sshErr.message}`
       });
     }
     
-    // Get the path to the installation script
-    const scriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
+    // Define remote paths (using /tmp/ instead of __dirname)
+    const timestamp = Date.now();
+    const remoteScriptPath = `/tmp/install-zabbix-rhel-${timestamp}.sh`;
+    const remoteLogPattern = `/tmp/zabbix_install_*.log`;
+    const localScriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
+    const localLogsDir = path.join(__dirname, 'agent-logs');
     
-    // Check if script exists
-    if (!fsSync.existsSync(scriptPath)) {
-      console.error(`[INSTALL] ERROR: Script not found at ${scriptPath}`);
+    // Ensure local logs directory exists
+    await executeShellCommand(`mkdir -p "${localLogsDir}"`);
+    await executeShellCommand(`chmod 755 "${localLogsDir}"`);
+    
+    // Upload installation script to remote server
+    console.log(`[SSH-INSTALL] Uploading script: ${localScriptPath} → ${remoteScriptPath}`);
+    
+    try {
+      await uploadFileSSH(connection, localScriptPath, remoteScriptPath);
+      console.log(`[SSH-INSTALL] ✓ Script uploaded successfully`);
+      
+      // Set executable permissions on remote script
+      await executeSSHCommand(connection, `chmod 755 ${remoteScriptPath}`);
+      console.log(`[SSH-INSTALL] ✓ Script permissions set to 755 (rwxr-xr-x)\n`);
+    } catch (uploadErr) {
+      console.error(`[SSH-INSTALL] ✗ Upload failed: ${uploadErr.message}`);
+      connection.end();
       return res.status(500).json({
-        error: 'Installation script not found',
-        details: `Script path: ${scriptPath}`
+        error: 'Script upload failed',
+        details: uploadErr.message
       });
     }
-    console.log(`[INSTALL] Script exists at: ${scriptPath}`);
     
-    // Make sure script is executable with 755 permissions
+    // Execute installation on remote server
+    const installCommand = `sudo ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
+    console.log(`[SSH-INSTALL] Executing installation command:`);
+    console.log(`[SSH-INSTALL] ${installCommand}\n`);
+    
+    let result;
     try {
-      await executeShellCommand(`chmod 755 "${scriptPath}"`);
-      console.log(`[INSTALL] Installation script permissions: 755 (rwxr-xr-x)`);
-    } catch (chmodErr) {
-      console.error(`[INSTALL] WARNING: Could not set script permissions: ${chmodErr.message}`);
+      result = await executeSSHCommand(connection, installCommand);
+      console.log(`[SSH-INSTALL] Command execution completed`);
+      console.log(`[SSH-INSTALL] Exit code: ${result.code}`);
+      console.log(`[SSH-INSTALL] Output:\n${result.stdout}`);
+      if (result.stderr) {
+        console.log(`[SSH-INSTALL] Errors:\n${result.stderr}`);
+      }
+    } catch (execErr) {
+      console.error(`[SSH-INSTALL] ✗ Execution failed: ${execErr.message}`);
+      connection.end();
+      return res.status(500).json({
+        error: 'Remote execution failed',
+        details: execErr.message
+      });
     }
     
-    console.log(`[INSTALL] Executing installation script with passwordless sudo...`);
-    console.log(`[INSTALL] Script path: ${scriptPath}\n`);
+    // Retrieve installation log from remote server
+    console.log(`[SSH-INSTALL] Retrieving installation log...`);
     
-    // Debug: Log all parameters
-    console.log(`[INSTALL] Parameters being passed:`);
-    console.log(`  - version: "${version}" (type: ${typeof version})`);
-    console.log(`  - serverIP: "${serverIP}" (type: ${typeof serverIP})`);
-    console.log(`  - hostname: "${hostname}" (type: ${typeof hostname})`);
-    console.log(`  - serverPort: "${serverPort}" (type: ${typeof serverPort})\n`);
-    
-    // SECURITY: No password handling - relies on sudoers configuration
-    // Execute installation directly with sudo (requires passwordless sudo setup)
-    // Note: Arguments are pre-validated to contain only safe characters
-    const installCommand = `sudo ${scriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
-    console.log(`[INSTALL] Full command: ${installCommand}\n`);
-    
-    // Add command to debug log
     try {
-      await fs.appendFile(debugLog, `\nScript path: ${scriptPath}\n`);
-      await fs.appendFile(debugLog, `\nCommand being executed:\n${installCommand}\n`);
-      await fs.appendFile(debugLog, `Command length: ${installCommand.length} characters\n`);
-      await fs.appendFile(debugLog, `\nCommand breakdown:\n`);
-      await fs.appendFile(debugLog, `  sudo\n`);
-      await fs.appendFile(debugLog, `  ${scriptPath}\n`);
-      await fs.appendFile(debugLog, `  ${version}\n`);
-      await fs.appendFile(debugLog, `  ${serverIP}\n`);
-      await fs.appendFile(debugLog, `  ${hostname}\n`);
-      await fs.appendFile(debugLog, `  ${serverPort}\n`);
-      // Ensure permissions are set
-      await executeShellCommand(`chmod 777 ${debugLog}`);
-    } catch { /* ignore */ }
-    
-    console.log(`[INSTALL] About to execute command...`);
-    console.log(`[INSTALL] Command length: ${installCommand.length} characters`);
-    console.log(`[INSTALL] Debug log updated: ${debugLog} (permissions: 777)\n`);
-    
-    const result = await executeShellCommand(installCommand, { timeout: 600000 });
-    
-    console.log(`[INSTALL] Command execution completed`);
-    console.log(`[INSTALL] Exit code: ${result.code || 0}`);
-    console.log(`[INSTALL] Success: ${result.success}`);
-    console.log(`[INSTALL] Output:\n${result.stdout}`);
-    if (result.stderr) {
-      console.log(`[INSTALL] Errors:\n${result.stderr}`);
+      // Find the latest log file
+      const findLogResult = await executeSSHCommand(connection, `ls -t ${remoteLogPattern} 2>/dev/null | head -1`);
+      const remoteLogPath = findLogResult.stdout.trim();
+      
+      if (remoteLogPath) {
+        const logFilename = `${hostname}_install_${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+        const localLogPath = path.join(localLogsDir, logFilename);
+        
+        await downloadFileSSH(connection, remoteLogPath, localLogPath);
+        await executeShellCommand(`chmod 777 "${localLogPath}"`);
+        
+        console.log(`[SSH-INSTALL] ✓ Log retrieved: ${logFilename}\n`);
+      } else {
+        console.log(`[SSH-INSTALL] ⚠ No installation log found on remote server\n`);
+      }
+    } catch (logErr) {
+      console.warn(`[SSH-INSTALL] ⚠ Could not retrieve log: ${logErr.message}`);
     }
+    
+    // Cleanup remote script
+    try {
+      await executeSSHCommand(connection, `sudo rm -f ${remoteScriptPath}`);
+      console.log(`[SSH-INSTALL] ✓ Remote cleanup completed`);
+    } catch (cleanErr) {
+      console.warn(`[SSH-INSTALL] ⚠ Cleanup failed: ${cleanErr.message}`);
+    }
+    
+    // Close SSH connection
+    connection.end();
+    console.log(`[SSH-INSTALL] ✓ SSH connection closed\n`);
     
     const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
     
     // Check for success
-    if (result.success && (combinedOutput.includes('successfully installed') || combinedOutput.includes('Installation completed'))) {
-      console.log(`[INSTALL] ✓ Success\n`);
+    if (result.success && (combinedOutput.includes('successfully installed') || combinedOutput.includes('Installation completed') || combinedOutput.includes('INSTALLATION COMPLETED'))) {
+      console.log(`[SSH-INSTALL] ✓ Installation SUCCESS\n`);
       return res.json({
         success: true,
-        message: `Zabbix Agent ${version} installed successfully on RHEL`,
-        output: combinedOutput
+        message: `Zabbix Agent ${version} installed successfully on ${host}`,
+        output: combinedOutput,
+        host: host
       });
     }
     
     // Parse and return error
-    console.log(`[INSTALL] ✗ Failed\n`);
+    console.log(`[SSH-INSTALL] ✗ Installation FAILED\n`);
     const errorInfo = parseInstallError(combinedOutput);
-    return res.status(errorInfo.status).json(errorInfo);
+    return res.status(errorInfo.status).json({
+      ...errorInfo,
+      host: host,
+      output: combinedOutput
+    });
     
   } catch (error) {
-    console.error(`[INSTALL] ✗ Exception: ${error.message}\n`);
+    console.error(`[SSH-INSTALL] ✗ Exception: ${error.message}\n`);
+    
+    if (connection) {
+      connection.end();
+    }
     
     res.status(500).json({
       error: 'Installation failed',
@@ -812,22 +818,5 @@ app.listen(PORT, async () => {
     console.error(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`);
   }
   
-  // Automatically check and configure passwordless sudo
-  console.log('🔐 Checking passwordless sudo configuration...');
-  const isSudoConfigured = await checkPasswordlessSudo();
-  
-  if (isSudoConfigured) {
-    console.log('✅ Passwordless sudo is already configured\n');
-  } else {
-    console.log('⚠️  Passwordless sudo not configured. Setting up automatically...');
-    const setupSuccess = await setupPasswordlessSudo();
-    
-    if (!setupSuccess) {
-      console.log('\n⚠️  WARNING: Passwordless sudo setup failed!');
-      console.log('   Installation may fail without proper sudo configuration.');
-      console.log('   Manually run: cd server && sudo bash setup-sudo.sh\n');
-    }
-  }
-  
-  console.log('✨ Backend ready to accept requests\n');
+  console.log('✨ Backend ready to accept SSH remote installation requests\n');
 });

@@ -108,23 +108,23 @@ export const downloadAgentPackage = async (version) => {
 };
 
 /**
- * Install Zabbix agent on localhost (RHEL server)
- * Requires passwordless sudo configuration on the server
- * @param {Object} installData - Installation configuration
+ * Install Zabbix agent on remote RHEL server via SSH
+ * Connects to remote server, uploads script, executes installation, and retrieves logs
+ * @param {Object} installData - Installation configuration including SSH credentials
  * @returns {Promise<Object>} Response from backend
  */
-export const installLocalhostAgent = async (installData) => {
-  console.log('[backendService] installLocalhostAgent called');
+export const installRemoteAgent = async (installData) => {
+  console.log('[backendService] installRemoteAgent called');
   console.log('[backendService] Install data:', installData);
   console.log('[backendService] Backend URL:', BACKEND_API_URL);
   
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 420000); // 7 minute timeout
+    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout
 
-    console.log('[backendService] Making POST request to:', `${BACKEND_API_URL}/install-localhost`);
+    console.log('[backendService] Making POST request to:', `${BACKEND_API_URL}/install-remote`);
     
-    const response = await fetch(`${BACKEND_API_URL}/install-localhost`, {
+    const response = await fetch(`${BACKEND_API_URL}/install-remote`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -144,15 +144,15 @@ export const installLocalhostAgent = async (installData) => {
     }
 
     const data = await response.json();
-    console.log('Localhost installation completed:', data);
+    console.log('Remote installation completed:', data);
     return data;
   } catch (error) {
-    console.error('Failed to install on localhost:', error);
+    console.error('Failed to install on remote server:', error);
     if (error.name === 'AbortError') {
-      throw new Error('Installation timeout - The installation is taking too long. Please check network connectivity and server resources.');
+      throw new Error('Installation timeout - The installation is taking too long. Please check SSH connectivity and server resources.');
     }
     throw error;
   }
 };
 
-export default { logAgentAction, getLogFiles, fetchAgentVersions, downloadAgentPackage, installLocalhostAgent };
+export default { logAgentAction, getLogFiles, fetchAgentVersions, downloadAgentPackage, installRemoteAgent };

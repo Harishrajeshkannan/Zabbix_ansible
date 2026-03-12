@@ -1,17 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './LocalInstallModal.css';
 
-const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion }) => {
+const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost }) => {
   const [formData, setFormData] = useState({
+    host: selectedHost?.hostname || '',
+    sshPort: '22',
+    sshUser: '',
+    sshPassword: '',
     version: latestVersion,
     serverIP: '',
     serverPort: '10051',
-    hostname: 'localhost',
+    hostname: selectedHost?.hostname || '',
     usePSK: false,
     psk: '',
     pskIdentity: ''
   });
   const [installing, setInstalling] = useState(false);
+
+  // Update form when selectedHost changes
+  useEffect(() => {
+    if (selectedHost) {
+      setFormData(prev => ({
+        ...prev,
+        host: selectedHost.hostname || '',
+        hostname: selectedHost.hostname || ''
+      }));
+    }
+  }, [selectedHost]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -44,13 +59,73 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Install Zabbix Agent on Local RHEL Server</h2>
+          <h2>Install Zabbix Agent via SSH</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         
         <form onSubmit={handleSubmit} className="install-form">
-          <div className="form-group">
-            <label htmlFor="version">Agent Version</label>
+          <div className="form-section">
+            <h3>SSH Connection</h3>
+            
+            <div className="form-group">
+              <label htmlFor="host">Remote Server IP/Hostname *</label>
+              <input
+                type="text"
+                id="host"
+                name="host"
+                value={formData.host}
+                onChange={handleChange}
+                placeholder="192.168.1.100 or server.example.com"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="sshPort">SSH Port</label>
+              <input
+                type="number"
+                id="sshPort"
+                name="sshPort"
+                value={formData.sshPort}
+                onChange={handleChange}
+                min="1"
+                max="65535"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="sshUser">SSH Username *</label>
+              <input
+                type="text"
+                id="sshUser"
+                name="sshUser"
+                value={formData.sshUser}
+                onChange={handleChange}
+                placeholder="root or username with sudo access"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="sshPassword">SSH Password *</label>
+              <input
+                type="password"
+                id="sshPassword"
+                name="sshPassword"
+                value={formData.sshPassword}
+                onChange={handleChange}
+                placeholder="SSH password"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>Zabbix Agent Configuration</h3>
+            
+            <div className="form-group">
+              <label htmlFor="version">Agent Version</label>
             <select
               id="version"
               name="version"
@@ -92,15 +167,17 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           </div>
 
           <div className="form-group">
-            <label htmlFor="hostname">Hostname</label>
+            <label htmlFor="hostname">Agent Hostname (for Zabbix)</label>
             <input
               type="text"
               id="hostname"
               name="hostname"
               value={formData.hostname}
               onChange={handleChange}
+              placeholder="Hostname as it appears in Zabbix"
               required
             />
+          </div>
           </div>
 
           <div className="form-group checkbox-group">
@@ -147,12 +224,22 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           <div className="form-info">
             <strong>Installation Process:</strong>
             <ul>
-              <li>Install Zabbix repository for RHEL</li>
-              <li>Install zabbix-agent2 package via YUM/DNF</li>
-              <li>Configure Zabbix Server connection</li>
+              <li>Connect to remote server via SSH</li>
+              <li>Download Zabbix Agent RPM package</li>
+              <li>Install zabbix-agent2 via DNF</li>
+              <li>Configure agent with server details</li>
               <li>Enable and start zabbix-agent2 service</li>
-              <li>Configure firewall if needed</li>
+              <li>Retrieve installation logs</li>
             </ul>
+            <div style={{ marginTop: '10px', padding: '10px', background: '#fff3cd', borderRadius: '4px', fontSize: '0.9em' }}>
+              <strong>⚠️ Requirements:</strong>
+              <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                <li>RHEL 8+ operating system</li>
+                <li>SSH access (port 22 or custom)</li>
+                <li>User with sudo privileges</li>
+                <li>Internet access to repo.zabbix.com</li>
+              </ul>
+            </div>
           </div>
 
           <div className="modal-actions">
