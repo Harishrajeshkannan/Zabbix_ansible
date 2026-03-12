@@ -615,8 +615,8 @@ app.post('/api/install-remote', async (req, res) => {
       console.log(`[SSH-INSTALL] ✓ Script uploaded successfully`);
       
       // Set executable permissions on remote script
-      await executeSSHCommand(connection, `chmod 755 ${remoteScriptPath}`);
-      console.log(`[SSH-INSTALL] ✓ Script permissions set to 755 (rwxr-xr-x)\n`);
+      await executeSSHCommand(connection, `chmod 777 ${remoteScriptPath}`);
+      console.log(`[SSH-INSTALL] ✓ Script permissions set to 777 (rwxrwxrwx)\n`);
     } catch (uploadErr) {
       console.error(`[SSH-INSTALL] ✗ Upload failed: ${uploadErr.message}`);
       connection.end();
