@@ -157,6 +157,11 @@
   opacity: 0.9;
 }
 
+.batch-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
   .main-content {
     padding: 1rem;

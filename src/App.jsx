@@ -510,24 +510,22 @@ function App() {
                   {selectedHostIds.length} hosts selected
                 </div>
                 <div className="batch-actions-buttons">
-                  {selectedInstallCount > 0 && (
-                    <button
-                      type="button"
-                      className="batch-btn batch-install"
-                      onClick={() => handleBatchAction('install')}
-                    >
-                      Install Selected ({selectedInstallCount})
-                    </button>
-                  )}
-                  {selectedUpdateCount > 0 && (
-                    <button
-                      type="button"
-                      className="batch-btn batch-update"
-                      onClick={() => handleBatchAction('update')}
-                    >
-                      Update Selected ({selectedUpdateCount})
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="batch-btn batch-install"
+                    onClick={() => handleBatchAction('install')}
+                    disabled={selectedInstallCount === 0}
+                  >
+                    Install Selected ({selectedInstallCount})
+                  </button>
+                  <button
+                    type="button"
+                    className="batch-btn batch-update"
+                    onClick={() => handleBatchAction('update')}
+                    disabled={selectedUpdateCount === 0}
+                  >
+                    Update Selected ({selectedUpdateCount})
+                  </button>
                 </div>
               </div>
             )}
