@@ -632,7 +632,7 @@ app.post('/api/install-remote', async (req, res) => {
     const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
     const installCommand = `echo '${escapedPassword}' | sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
+    console.log(`[SSH-INSTALL] sudo sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
     
     let result;
     try {

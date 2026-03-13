@@ -197,16 +197,30 @@ add_zabbix_repo() {
     mkdir -p "$TEMP_DIR"
     sudo chmod 777 "$TEMP_DIR"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Created temp directory: $TEMP_DIR with 777 permissions"
+    
+    # Keep a persistent copy of downloaded RPMs for troubleshooting/reuse
+    PERSISTENT_RPM_DIR="/tmp/zabbix_agent_rpms"
+    mkdir -p "$PERSISTENT_RPM_DIR"
+    sudo chmod 777 "$PERSISTENT_RPM_DIR"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Persistent RPM directory: $PERSISTENT_RPM_DIR (777 permissions)"
+
     AGENT_RPM="$TEMP_DIR/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
+    PERSISTENT_AGENT_RPM="$PERSISTENT_RPM_DIR/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
     
     print_info "Downloading agent package..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading to: $AGENT_RPM"
     
     if curl -f -L -o "$AGENT_RPM" "$AGENT_URL"; then
         sudo chmod 777 "$AGENT_RPM"
+
+        # Save a durable copy so RPM remains on remote server after temp cleanup
+        cp -f "$AGENT_RPM" "$PERSISTENT_AGENT_RPM"
+        sudo chmod 777 "$PERSISTENT_AGENT_RPM"
+
         print_success "Agent package downloaded successfully"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download completed: $(ls -lh "$AGENT_RPM" | awk '{print $5}')"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] File permissions set to 777"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Persistent copy saved at: $PERSISTENT_AGENT_RPM"
         
         # Check if any version of zabbix-agent2 is already installed
         if rpm -q zabbix-agent2 >/dev/null 2>&1; then
