@@ -99,6 +99,17 @@
   border-bottom: 2px solid #3b82f6;
 }
 
+.batch-mode-note {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1e40af;
+  border-radius: 8px;
+  font-size: 0.813rem;
+  font-weight: 500;
+}
+
 .form-group {
   margin-bottom: 1.5rem;
 }

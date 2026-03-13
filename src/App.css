@@ -111,6 +111,52 @@
   font-weight: 500;
 }
 
+.batch-actions-bar {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid #dbeafe;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.batch-actions-summary {
+  font-size: 0.875rem;
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.batch-actions-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.batch-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  color: #fff;
+  font-size: 0.813rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.batch-install {
+  background: #2563eb;
+}
+
+.batch-update {
+  background: #d97706;
+}
+
+.batch-btn:hover {
+  opacity: 0.9;
+}
+
 @media (max-width: 768px) {
   .main-content {
     padding: 1rem;
@@ -134,5 +180,14 @@
   .error-banner {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .batch-actions-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .batch-actions-buttons {
+    flex-direction: column;
   }
 }

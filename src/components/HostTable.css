@@ -39,6 +39,22 @@
   letter-spacing: 0.05em;
 }
 
+.select-col {
+  width: 46px;
+  text-align: center !important;
+}
+
+.select-col input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.select-col input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .host-table tbody tr {
   border-bottom: 1px solid #f3f4f6;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);

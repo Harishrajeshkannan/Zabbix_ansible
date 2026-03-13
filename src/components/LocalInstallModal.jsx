@@ -12,7 +12,9 @@ const resolvePreferredSSHHost = (host) => {
   return host.hostname || '';
 };
 
-const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost, action = 'install' }) => {
+const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost, selectedHosts = [], action = 'install' }) => {
+  const isBatchMode = selectedHosts.length > 1;
+
   const [formData, setFormData] = useState({
     host: resolvePreferredSSHHost(selectedHost),
     sshPort: '22',
@@ -81,24 +83,31 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
         <form onSubmit={handleSubmit} className="install-form">
           <div className="form-section">
             <h3>SSH Connection</h3>
+            {isBatchMode && (
+              <div className="batch-mode-note">
+                Batch mode enabled: {selectedHosts.length} hosts selected. Remote host and agent hostname are auto-filled per host.
+              </div>
+            )}
             {action === 'update' && selectedHost?.agentVersion && (
               <div className="update-info" style={{ marginBottom: '15px', padding: '10px', background: '#e3f2fd', borderRadius: '4px' }}>
                 <strong>Current Version:</strong> {selectedHost.agentVersion}
               </div>
             )}
-            
-            <div className="form-group">
-              <label htmlFor="host">Remote Server IP/Hostname *</label>
-              <input
-                type="text"
-                id="host"
-                name="host"
-                value={formData.host}
-                onChange={handleChange}
-                placeholder="192.168.1.100 or server.example.com"
-                required
-              />
-            </div>
+
+            {!isBatchMode && (
+              <div className="form-group">
+                <label htmlFor="host">Remote Server IP/Hostname *</label>
+                <input
+                  type="text"
+                  id="host"
+                  name="host"
+                  value={formData.host}
+                  onChange={handleChange}
+                  placeholder="192.168.1.100 or server.example.com"
+                  required
+                />
+              </div>
+            )}
 
             <div className="form-group">
               <label htmlFor="sshPort">SSH Port</label>
@@ -186,18 +195,20 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="hostname">Agent Hostname (for Zabbix)</label>
-            <input
-              type="text"
-              id="hostname"
-              name="hostname"
-              value={formData.hostname}
-              onChange={handleChange}
-              placeholder="Hostname as it appears in Zabbix"
-              required
-            />
-          </div>
+          {!isBatchMode && (
+            <div className="form-group">
+              <label htmlFor="hostname">Agent Hostname (for Zabbix)</label>
+              <input
+                type="text"
+                id="hostname"
+                name="hostname"
+                value={formData.hostname}
+                onChange={handleChange}
+                placeholder="Hostname as it appears in Zabbix"
+                required
+              />
+            </div>
+          )}
           </div>
 
           <div className="form-group checkbox-group">
@@ -269,7 +280,9 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
             <button type="submit" className="btn-install" disabled={installing}>
               {installing 
                 ? (action === 'update' ? 'Updating...' : 'Installing...') 
-                : (action === 'update' ? 'Update Agent' : 'Install Agent')}
+                : (isBatchMode
+                  ? `${action === 'update' ? 'Update' : 'Install'} Selected Hosts (${selectedHosts.length})`
+                  : (action === 'update' ? 'Update Agent' : 'Install Agent'))}
             </button>
           </div>
         </form>

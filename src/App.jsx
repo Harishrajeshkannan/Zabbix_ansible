@@ -16,6 +16,12 @@ import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
 function App() {
+  const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated';
+  const resolvePreferredSSHHost = (host) => {
+    const ip = (host?.ip || '').trim();
+    return ip && ip.toUpperCase() !== 'N/A' ? ip : (host?.hostname || '');
+  };
+
   // View state
   const [currentView, setCurrentView] = useState('dashboard');
   
@@ -40,6 +46,8 @@ function App() {
   const [availableVersions, setAvailableVersions] = useState([]);
   const [selectedHost, setSelectedHost] = useState(null);
   const [actionType, setActionType] = useState('');
+  const [selectedHostIds, setSelectedHostIds] = useState([]);
+  const [batchHosts, setBatchHosts] = useState([]);
 
   // Load data from Zabbix API
   const loadData = useCallback(async () => {
@@ -50,6 +58,7 @@ function App() {
       console.log('Fetching data from Zabbix API...');
       const data = await fetchAllData();
       setHosts(data.hosts);
+      setSelectedHostIds((prev) => prev.filter((id) => data.hosts.some((host) => host.id === id)));
       setHostGroups(data.hostGroups);
       if (data.latestVersion) setLatestVersion(data.latestVersion);
       if (data.availableVersions) setAvailableVersions(data.availableVersions);
@@ -102,6 +111,7 @@ function App() {
       refreshHostData(latestVersion)
         .then(updatedHosts => {
           setHosts(updatedHosts);
+          setSelectedHostIds((prev) => prev.filter((id) => updatedHosts.some((host) => host.id === id)));
 
           // Derive host groups from refreshed hosts to keep filters in sync
           const derivedGroups = Array.from(new Set(updatedHosts.flatMap((h) => {
@@ -165,6 +175,23 @@ function App() {
 
   const totalPages = Math.ceil(filteredHosts.length / pageSize);
 
+  const selectedHosts = useMemo(
+    () => hosts.filter((host) => selectedHostIds.includes(host.id)),
+    [hosts, selectedHostIds]
+  );
+
+  const visibleActionableHosts = useMemo(
+    () => paginatedHosts.filter(canHostBeActioned),
+    [paginatedHosts]
+  );
+
+  const allVisibleSelected =
+    visibleActionableHosts.length > 0 &&
+    visibleActionableHosts.every((host) => selectedHostIds.includes(host.id));
+
+  const selectedInstallCount = selectedHosts.filter((host) => host.status === 'No Agent').length;
+  const selectedUpdateCount = selectedHosts.filter((host) => host.status === 'Outdated').length;
+
   const handlePageChange = (page) => {
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -191,6 +218,46 @@ function App() {
     setCurrentPage(1);
   };
 
+  const handleToggleHostSelection = (host) => {
+    if (!canHostBeActioned(host)) return;
+
+    setSelectedHostIds((prev) =>
+      prev.includes(host.id) ? prev.filter((id) => id !== host.id) : [...prev, host.id]
+    );
+  };
+
+  const handleToggleSelectAllVisible = (checked) => {
+    const visibleIds = visibleActionableHosts.map((host) => host.id);
+
+    setSelectedHostIds((prev) => {
+      if (checked) {
+        return [...new Set([...prev, ...visibleIds])];
+      }
+      return prev.filter((id) => !visibleIds.includes(id));
+    });
+  };
+
+  const handleBatchAction = (action) => {
+    const targets = selectedHosts.filter((host) =>
+      action === 'install' ? host.status === 'No Agent' : host.status === 'Outdated'
+    );
+
+    if (targets.length < 1) {
+      toast.error(`No eligible hosts selected for ${action}.`);
+      return;
+    }
+
+    setBatchHosts(targets);
+    setSelectedHost(targets[0]);
+    setActionType(action);
+    setLocalInstallModalOpen(true);
+  };
+
+  const handleCloseInstallModal = () => {
+    setLocalInstallModalOpen(false);
+    setBatchHosts([]);
+  };
+
   // Action handlers
   const handleInstall = async (host) => {
     // Open SSH install modal for all hosts
@@ -203,23 +270,75 @@ function App() {
     const action = actionType || 'install';
     const actionVerb = action === 'install' ? 'Installing' : 'Updating';
     const actionPastTense = action === 'install' ? 'installed' : 'updated';
-    
-    const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via SSH...`);
-    
-    try {
-      await installRemoteAgent(installData);
-      
-      toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
-      
-      // Reload data to reflect the installation/update
-      setTimeout(() => {
-        loadData();
-      }, 2000);
-      
-    } catch (error) {
-      toast.error(`${action === 'install' ? 'Installation' : 'Update'} failed: ${error.message}`, { id: toastId });
-      throw error;
+
+    const isBatch = batchHosts.length > 1;
+    const targets = isBatch ? batchHosts : [selectedHost].filter(Boolean);
+
+    if (targets.length === 0) {
+      toast.error('No host selected');
+      throw new Error('No host selected');
     }
+
+    if (!isBatch) {
+      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via SSH...`);
+      try {
+        await installRemoteAgent(installData);
+        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
+        setTimeout(() => {
+          loadData();
+        }, 2000);
+      } catch (error) {
+        toast.error(`${action === 'install' ? 'Installation' : 'Update'} failed: ${error.message}`, { id: toastId });
+        throw error;
+      }
+      return;
+    }
+
+    const toastId = toast.loading(`${actionVerb} on 1/${targets.length}: ${targets[0].hostname}`);
+    const failures = [];
+    let successCount = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+
+      toast.loading(`${actionVerb} on ${i + 1}/${targets.length}: ${target.hostname}`, { id: toastId });
+
+      const payload = {
+        host: resolvePreferredSSHHost(target),
+        sshPort: installData.sshPort,
+        sshUser: installData.sshUser,
+        sshPassword: installData.sshPassword,
+        version: installData.version,
+        serverIP: installData.serverIP,
+        serverPort: installData.serverPort,
+        hostname: target.hostname
+      };
+
+      try {
+        await installRemoteAgent(payload);
+        successCount += 1;
+      } catch (error) {
+        failures.push({ hostname: target.hostname, message: error.message });
+      }
+    }
+
+    if (failures.length === 0) {
+      toast.success(`Batch ${actionPastTense} completed on ${successCount}/${targets.length} hosts`, { id: toastId });
+    } else {
+      const failureSummary = failures
+        .slice(0, 3)
+        .map((item) => `${item.hostname}: ${item.message}`)
+        .join(' | ');
+
+      toast.error(
+        `Batch finished with failures (${successCount}/${targets.length} successful)`,
+        { id: toastId, description: failureSummary }
+      );
+    }
+
+    setSelectedHostIds([]);
+    setBatchHosts([]);
+    await loadData();
   };
 
   const handleUpdate = async (host) => {
@@ -380,7 +499,38 @@ function App() {
               hosts={paginatedHosts}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
+              selectedHostIds={selectedHostIds}
+              onToggleHostSelection={handleToggleHostSelection}
+              onToggleSelectAllVisible={handleToggleSelectAllVisible}
+              allVisibleSelected={allVisibleSelected}
             />
+            {selectedHostIds.length > 1 && (
+              <div className="batch-actions-bar">
+                <div className="batch-actions-summary">
+                  {selectedHostIds.length} hosts selected
+                </div>
+                <div className="batch-actions-buttons">
+                  {selectedInstallCount > 0 && (
+                    <button
+                      type="button"
+                      className="batch-btn batch-install"
+                      onClick={() => handleBatchAction('install')}
+                    >
+                      Install Selected ({selectedInstallCount})
+                    </button>
+                  )}
+                  {selectedUpdateCount > 0 && (
+                    <button
+                      type="button"
+                      className="batch-btn batch-update"
+                      onClick={() => handleBatchAction('update')}
+                    >
+                      Update Selected ({selectedUpdateCount})
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             {filteredHosts.length > 0 && (
               <Pagination
                 currentPage={currentPage}
@@ -398,11 +548,12 @@ function App() {
       {/* SSH Install/Update Modal */}
       <LocalInstallModal
         isOpen={localInstallModalOpen}
-        onClose={() => setLocalInstallModalOpen(false)}
+        onClose={handleCloseInstallModal}
         onInstall={handleLocalInstall}
         availableVersions={availableVersions}
         latestVersion={latestVersion}
         selectedHost={selectedHost}
+        selectedHosts={batchHosts}
         action={actionType}
       />
     </div>

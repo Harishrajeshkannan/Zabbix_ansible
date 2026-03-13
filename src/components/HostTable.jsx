@@ -1,7 +1,17 @@
 import React from 'react';
 import './HostTable.css';
 
-const HostTable = ({ hosts, onInstall, onUpdate }) => {
+const HostTable = ({
+  hosts,
+  onInstall,
+  onUpdate,
+  selectedHostIds = [],
+  onToggleHostSelection,
+  onToggleSelectAllVisible,
+  allVisibleSelected = false
+}) => {
+  const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated';
+
   const getStatusClass = (status) => {
     switch (status) {
       case 'Up to Date':
@@ -41,11 +51,32 @@ const HostTable = ({ hosts, onInstall, onUpdate }) => {
     }
   };
 
+  const getSelectionCheckbox = (host) => {
+    const disabled = !canHostBeActioned(host);
+    return (
+      <input
+        type="checkbox"
+        checked={selectedHostIds.includes(host.id)}
+        disabled={disabled}
+        onChange={() => onToggleHostSelection(host)}
+        aria-label={`Select ${host.hostname}`}
+      />
+    );
+  };
+
   return (
     <div className="table-container">
       <table className="host-table">
         <thead>
           <tr>
+            <th className="select-col">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={(e) => onToggleSelectAllVisible(e.target.checked)}
+                aria-label="Select all visible actionable hosts"
+              />
+            </th>
             <th>Hostname</th>
             <th>Host Group</th>
             <th>Operating System</th>
@@ -58,13 +89,14 @@ const HostTable = ({ hosts, onInstall, onUpdate }) => {
         <tbody>
           {hosts.length === 0 ? (
             <tr>
-              <td colSpan="7" className="no-data">
+              <td colSpan="8" className="no-data">
                 No hosts found matching the current filters
               </td>
             </tr>
           ) : (
             hosts.map((host) => (
               <tr key={host.id}>
+                <td className="select-col">{getSelectionCheckbox(host)}</td>
                 <td className="hostname-cell">
                   <div className="hostname-content">
                     <span className="hostname">{host.hostname}</span>
