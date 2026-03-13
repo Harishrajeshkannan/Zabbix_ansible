@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import './LocalInstallModal.css';
 
+const resolvePreferredSSHHost = (host) => {
+  if (!host) return '';
+
+  const ip = (host.ip || '').trim();
+  if (ip && ip.toUpperCase() !== 'N/A') {
+    return ip;
+  }
+
+  return host.hostname || '';
+};
+
 const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost, action = 'install' }) => {
   const [formData, setFormData] = useState({
-    host: selectedHost?.hostname || '',
+    host: resolvePreferredSSHHost(selectedHost),
     sshPort: '22',
     sshUser: '',
     sshPassword: '',
@@ -22,7 +33,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     if (selectedHost) {
       setFormData(prev => ({
         ...prev,
-        host: selectedHost.hostname || '',
+        host: resolvePreferredSSHHost(selectedHost),
         hostname: selectedHost.hostname || '',
         // Pre-fill version with current version for updates
         version: action === 'update' && selectedHost.agentVersion 
