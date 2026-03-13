@@ -49,6 +49,14 @@ async function executeShellCommand(command, options = {}) {
  * Parse error from installation output
  */
 function parseInstallError(output) {
+  if (output.includes('not allowed to execute') || output.includes('Sorry, user')) {
+    return {
+      status: 403,
+      error: 'Sudo policy blocked execution',
+      details: 'The SSH user is authenticated but is not permitted by sudoers to run the install command. Grant sudo permission for /bin/sh and the install script path, or use an SSH user with broader sudo access.'
+    };
+  }
+
   if (output.includes('permission denied') || output.includes('Permission denied')) {
     return {
       status: 403,
@@ -615,8 +623,8 @@ app.post('/api/install-remote', async (req, res) => {
       console.log(`[SSH-INSTALL] ✓ Script uploaded successfully`);
       
       // Set executable permissions on remote script
-      await executeSSHCommand(connection, `chmod 777 ${remoteScriptPath}`);
-      console.log(`[SSH-INSTALL] ✓ Script permissions set to 777 (rwxrwxrwx)\n`);
+      await executeSSHCommand(connection, `chmod 755 ${remoteScriptPath}`);
+      console.log(`[SSH-INSTALL] ✓ Script permissions set to 755 (rwxr-xr-x)\n`);
     } catch (uploadErr) {
       console.error(`[SSH-INSTALL] ✗ Upload failed: ${uploadErr.message}`);
       connection.end();
@@ -632,7 +640,7 @@ app.post('/api/install-remote', async (req, res) => {
     const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
     const installCommand = `echo '${escapedPassword}' | sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
+    console.log(`[SSH-INSTALL] sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
     
     let result;
     try {

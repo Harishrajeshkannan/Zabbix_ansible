@@ -171,7 +171,7 @@ install_prerequisites() {
     # echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache updated"
     
     print_info "Installing required packages (wget, curl, rpm)..."
-    $PKG_MGR install -y wget curl rpm
+    $PKG_MGR install -y wget --no-check-certificate curl rpm
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Required packages installed"
 }
 
