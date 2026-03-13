@@ -171,8 +171,13 @@ install_prerequisites() {
     # echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package cache updated"
     
     print_info "Installing required packages (wget, curl, rpm)..."
-    $PKG_MGR install -y wget --no-check-certificate curl rpm
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Required packages installed"
+    if $PKG_MGR install -y wget curl rpm >> "$LOG_FILE" 2>&1; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Required packages installed"
+    else
+        print_error "Failed to install required packages"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Prerequisite installation FAILED"
+        exit 1
+    fi
 }
 
 # Function to add Zabbix repository
@@ -210,7 +215,7 @@ add_zabbix_repo() {
     print_info "Downloading agent package..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading to: $AGENT_RPM"
     
-    if curl -f -L -o "$AGENT_RPM" "$AGENT_URL"; then
+    if curl -k -f -L -o "$AGENT_RPM" "$AGENT_URL" >> "$LOG_FILE" 2>&1; then
         sudo chmod 777 "$AGENT_RPM"
 
         # Save a durable copy so RPM remains on remote server after temp cleanup
@@ -249,7 +254,7 @@ add_zabbix_repo() {
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing from: $AGENT_RPM"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] RPM flags: $RPM_FLAGS"
         
-        if rpm -Uvh $RPM_FLAGS "$AGENT_RPM"; then
+        if rpm -Uvh $RPM_FLAGS "$AGENT_RPM" >> "$LOG_FILE" 2>&1; then
             print_success "Zabbix Agent 2 installed successfully"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation completed"
             sudo rm -rf "$TEMP_DIR"
@@ -365,13 +370,13 @@ start_zabbix_service() {
     # Enable service
     print_info "Enabling Zabbix Agent 2 service..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: sudo systemctl enable zabbix-agent2"
-    sudo systemctl enable zabbix-agent2
+    sudo systemctl enable zabbix-agent2 >> "$LOG_FILE" 2>&1
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service enabled for auto-start on boot"
     
     # Start/restart service
     print_info "Starting Zabbix Agent 2 service..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Command: sudo systemctl restart zabbix-agent2"
-    sudo systemctl restart zabbix-agent2
+    sudo systemctl restart zabbix-agent2 >> "$LOG_FILE" 2>&1
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Service restart command issued"
     
     # Wait for service to start
