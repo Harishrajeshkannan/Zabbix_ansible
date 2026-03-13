@@ -1,248 +1,217 @@
-# Quick Start - Testing Zabbix API
+# Zabbix Deployment Portal - Quick Start Guide
 
-## Quick Test with Your Existing Postman Setup
+Get up and running with the Zabbix Deployment Portal for RHEL systems in minutes.
 
-Since you already tested the API in Postman, here's how to quickly integrate it:
+## Prerequisites
 
-### 1. Copy Your API Details
+### System Requirements
+- **RHEL-based OS**: RHEL 7/8/9, CentOS, Rocky Linux, or AlmaLinux
+- **Node.js**: Version 16 or higher
+- **npm**: Comes with Node.js
+- **Internet Access**: For downloading packages and repositories
+- **Sudo User**: With password for system installations
 
-From your Postman request, you need:
-- **URL**: The Zabbix API endpoint (e.g., `https://your-server.com/api_jsonrpc.php`)
-- **Token**: Your authentication token
-
-### 2. Create `.env` File
-
-Create a file named `.env` in the project root (same folder as `package.json`):
-
-```env
-VITE_ZABBIX_API_URL=https://your-zabbix-server.com/api_jsonrpc.php
-VITE_ZABBIX_API_TOKEN=your_api_token_here
-VITE_LATEST_AGENT_VERSION=7.0.0
-```
-
-**Example:**
-```env
-VITE_ZABBIX_API_URL=https://zabbix.company.com/api_jsonrpc.php
-VITE_ZABBIX_API_TOKEN=abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
-VITE_LATEST_AGENT_VERSION=7.0.0
-```
-
-### 3. Enable Real API Mode
-
-Open `src/App.jsx` and find this line near the top (around line 13):
-
-```javascript
-const USE_MOCK_DATA = false; // Change from true to false
-```
-
-Make sure it's set to `false`.
-
-### 4. Start the Application
-
+### Check Prerequisites
 ```bash
-npm run dev
+# Check Node.js version
+node --version  # Should be 16+
+
+# Check if you're on RHEL-based system
+cat /etc/redhat-release
+
+# Test sudo access
+sudo whoami
 ```
 
-The app will automatically load data from your Zabbix server!
+## Installation
 
-## Example Postman Requests
-
-### Headers Required
-```
-Content-Type: application/json
-Authorization: Bearer your_token_here
+### 1. Clone the Repository
+```bash
+git clone <your-repository-url>
+cd Zabbix-Deployment-Portal
 ```
 
-### Test Connection
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "apiinfo.version",
-    "params": {},
-    "id": 1
-}
-```
-
-### Get Host Groups
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "hostgroup.get",
-    "params": {
-        "output": "extend"
-    },
-    "id": 1
-}
-```
-
-### Get Hosts with Details
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "host.get",
-    "params": {
-        "output": ["hostid", "host", "name", "status"],
-        "selectGroups": ["groupid", "name"],
-        "selectInterfaces": ["ip", "dns"],
-        "selectInventory": ["os"]
-    },
-    "id": 1
-}
-```
-
-### Get Agent Versions
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "item.get",
-    "params": {
-        "output": ["itemid", "hostid", "lastvalue"],
-        "search": {
-            "key_": "agent.version"
-        }
-    },
-    "id": 1
-}
-```
-
-## Authentication Methods
-
-### Using Bearer Token (Current Implementation)
-The API token is sent in the Authorization header:
-```
-Authorization: Bearer your_token_here
-```
-
-Request body does not include auth field:
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "host.get",
-    "params": {},
-    "id": 1
-}
-```
-
-### Using Username/Password (Older Zabbix Versions)
-
-If you're using an older Zabbix version without API tokens:
-
-1. First, get a session token:
-```json
-{
-    "jsonrpc": "2.0",
-    "method": "user.login",
-    "params": {
-        "username": "your_username",
-        "password": "your_password"
-    },
-    "id": 1
-}
-```
-
-2. Update `src/services/zabbixApi.js` to handle login:
-
-```javascript
-// Add this method to the ZabbixApiService class
-async login(username, password) {
-  const result = await this.request('user.login', {
-    username: username,
-    password: password,
-  });
-  this.apiToken = result;
-  return result;
-}
-```
-
-3. Update config to use username/password:
-```env
-VITE_ZABBIX_USERNAME=Admin
-VITE_ZABBIX_PASSWORD=zabbix
-```
-
-## Troubleshooting Common Issues
-
-### Issue: "Cannot find module"
-**Solution**: Make sure you installed dependencies:
+### 2. Install Dependencies
 ```bash
 npm install
 ```
 
-### Issue: Environment variables not loading
-**Solution**: 
-1. Restart the dev server after creating `.env`
-2. Make sure variables start with `VITE_`
-3. Check the file is named exactly `.env` (not `.env.txt`)
-
-### Issue: CORS Error
-**Solution**: Use the development proxy in `vite.config.js`:
-
-```javascript
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: {
-      '/api': {
-        target: 'https://your-zabbix-server.com',
-        changeOrigin: true,
-        secure: false, // if using self-signed certificate
-        rewrite: (path) => path.replace(/^\/api/, '/api_jsonrpc.php'),
-      },
-    },
-  },
-})
-```
-
-Then use `/api` as your API URL:
-```env
-VITE_ZABBIX_API_URL=/api
-```
-
-### Issue: "No Agent" status for all hosts
-**Solution**: 
-- Make sure the `agent.version` item exists in Zabbix
-- Check if agents are actually installed and reporting
-- Verify the item key is exactly `agent.version`
-
-## Testing Without Real Zabbix Server
-
-If you want to test the UI first before connecting to Zabbix:
-
-1. Keep `USE_MOCK_DATA = true` in `src/App.jsx`
-2. The app will use sample data from `src/data/mockData.js`
-3. This is useful for:
-   - UI development
-   - Testing filters and search
-   - Demonstrating to stakeholders
-
-## Next Steps After Integration
-
-Once you see your real Zabbix data:
-
-1. ✅ Verify all hosts are showing correctly
-2. ✅ Check host groups are populated
-3. ✅ Confirm agent versions are displayed
-4. ✅ Test all filters (search, host group, status)
-5. 🔄 Implement actual install/update scripts (backend required)
-
-## Need Help?
-
-Check the detailed guide: `SETUP_GUIDE.md`
-
-Common commands:
+### 3. Install System Dependencies
 ```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+# Ensure curl and wget are available
+sudo yum install -y curl wget || sudo dnf install -y curl wget
 ```
+
+### 4. Configure Passwordless Sudo
+```bash
+# Run the automated setup script
+cd server
+sudo bash setup-sudo.sh
+
+# Or see server/SECURITY_SETUP.md for manual configuration
+```
+
+## Running the Application
+
+### Option 1: Full Development Mode (Recommended)
+```bash
+npm run dev:full
+```
+This starts both frontend and backend servers:
+- **Frontend**: http://localhost:5173
+- **Backend**: http://localhost:3001
+
+### Option 2: Start Services Separately
+```bash
+# Terminal 1: Start backend
+npm run server
+
+# Terminal 2: Start frontend
+npm run dev
+```
+
+## First Use
+
+### 1. Access the Portal
+Open your browser and go to: **http://localhost:5173**
+
+### 2. Check System Information
+The dashboard will show:
+- Current OS and RHEL version
+- Zabbix agent installation status
+- Available sudo access
+
+### 3. Install Zabbix Agent
+1. **Select Version**: Choose a Zabbix Agent version (7.0.5 recommended)
+2. **Configure Server**: 
+   - Enter your Zabbix server IP/hostname
+   - Set server port (default: 10051)
+   - Choose a hostname for this agent
+3. **Security (Optional)**:
+   - Enable PSK encryption if needed
+   - Set PSK key and identity
+4. **Credentials**:
+   - Enter sudo username
+   - Enter sudo password
+5. **Install**: Click "Install Agent"
+
+### 4. Verify Installation
+After installation:
+- Check the installation logs
+- Verify service is running: `sudo systemctl status zabbix-agent2`
+- Test connectivity to Zabbix server
+
+## Configuration Examples
+
+### Basic Installation (No Encryption)
+- Version: `7.0.5`
+- Server: `192.168.1.100`
+- Hostname: `myserver.local`
+- PSK: Leave empty
+
+### Secure Installation (With PSK)
+- Version: `7.0.5`
+- Server: `zabbix.company.com`
+- Hostname: `prod-server-01`
+- PSK Key: `your-secret-psk-key-here`
+- PSK Identity: `prod-server-01`
+
+## Manual Script Usage
+
+You can also run the installation script directly:
+
+### Interactive Mode
+```bash
+cd server
+chmod +x install-zabbix-rhel.sh
+./install-zabbix-rhel.sh
+```
+
+### Command Line Mode
+```bash
+./install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver 10051 "psk-key" "psk-identity"
+```
+
+## Troubleshooting
+
+### Common Issues
+
+#### "Permission denied" when installing agent
+```bash
+# Verify passwordless sudo is configured
+sudo -l | grep install-zabbix-rhel.sh
+
+# Should show: NOPASSWD: /path/to/install-zabbix-rhel.sh
+
+# If not configured, run setup:
+cd server
+sudo bash setup-sudo.sh
+```
+
+#### Frontend not loading
+```bash
+# Check if port 5173 is available
+netstat -tlnp | grep :5173
+
+# Try different port
+npm run dev -- --port 3000
+```
+
+#### Backend connection errors
+```bash
+# Check if backend is running
+curl http://localhost:3001/api/health
+
+# Check system info endpoint
+curl http://localhost:3001/api/system-info
+```
+
+#### Repository errors during installation
+```bash
+# Update system packages
+sudo yum update -y || sudo dnf update -y
+
+# Check internet connectivity
+ping -c 3 repo.zabbix.com
+```
+
+### Getting Help
+
+1. **Check Logs**: View installation logs in the web interface
+2. **System Logs**: `sudo journalctl -u zabbix-agent2 -f`
+3. **Manual Test**: Run the installation script manually
+4. **Network**: Verify connectivity to Zabbix server and repositories
+
+## What's Next?
+
+- **Configure Monitoring**: Add hosts and items in your Zabbix server
+- **Set Up Alerts**: Configure triggers and notifications
+- **Scale Deployment**: Use the portal to install agents on multiple servers
+- **Monitor Logs**: Regular check installation logs and agent status
+
+## Development Mode
+
+For developers wanting to modify the application:
+
+```bash
+# Install in development mode
+npm run dev:full
+
+# Make changes to:
+# - Frontend: src/ directory
+# - Backend: server/ directory
+# - Installation script: server/install-zabbix-rhel.sh
+
+# Changes will auto-reload in development mode
+```
+
+## Security Notes
+
+- **Sudo Passwords**: Stored temporarily in memory only during installation
+- **PSK Keys**: Generated locally, not transmitted to external servers
+- **Network**: All RHEL package installations use official Zabbix repositories
+- **Logs**: Installation logs are stored locally in `agent-logs/` directory
+
+---
+
+🎉 **You're all set!** The Zabbix Deployment Portal is now ready to deploy agents on your RHEL infrastructure.

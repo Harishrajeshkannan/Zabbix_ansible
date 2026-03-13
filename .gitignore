@@ -39,9 +39,6 @@ tmp/
 *~
 
 # Config files
-config/
-*.config
-.config/
 config.json
 config.local.json
 settings.json

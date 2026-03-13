@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
-import os from 'os';
+import { Client as SSHClient } from 'ssh2';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -14,224 +14,70 @@ const __dirname = path.dirname(__filename);
 // ============= HELPER FUNCTIONS =============
 
 /**
- * Execute PowerShell script from file with proper error handling
+ * Execute shell command with proper error handling
  */
-async function executePowerShellScript(scriptContent, options = {}) {
+async function executeShellCommand(command, options = {}) {
   const { timeout = 180000, maxBuffer = 5 * 1024 * 1024 } = options;
-  const tempScriptPath = path.join(os.tmpdir(), `ps-script-${Date.now()}.ps1`);
+  
+  console.log(`[executeShellCommand] Received command: "${command}"`);
+  console.log(`[executeShellCommand] Command length: ${command.length}`);
+  console.log(`[executeShellCommand] Timeout: ${timeout}ms`);
   
   try {
-    await fs.writeFile(tempScriptPath, scriptContent, 'utf8');
+    const { stdout, stderr } = await execAsync(command, { 
+      timeout, 
+      maxBuffer,
+      shell: '/bin/bash'
+    });
     
-    const { stdout, stderr } = await execAsync(
-      `powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command "& '${tempScriptPath}' *>&1 | Out-String"`,
-      { timeout, maxBuffer, windowsHide: true }
-    );
-    
+    console.log(`[executeShellCommand] Execution successful`);
     return { stdout, stderr, success: true };
   } catch (error) {
+    console.log(`[executeShellCommand] Execution failed: ${error.message}`);
     return { 
       stdout: error.stdout || '', 
       stderr: error.stderr || '', 
       success: false, 
       error: error.message 
     };
-  } finally {
-    try {
-      await fs.unlink(tempScriptPath);
-    } catch {
-      // Ignore cleanup errors
-    }
   }
 }
 
-/**
- * Generate download PowerShell script
- */
-function generateDownloadScript(downloadUrl, outputPath) {
-  return `
-$ProgressPreference = 'SilentlyContinue'
-$ErrorActionPreference = 'Stop'
-$url = '${downloadUrl}'
-$output = '${outputPath}'
 
-Write-Host "Downloading from: $url"
-Write-Host "Saving to: $output"
-
-try {
-    # Verify version exists
-    Write-Host "Verifying version availability..."
-    try {
-        $headResponse = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 15
-        if ($headResponse.StatusCode -eq 404) {
-            throw "VERSION_NOT_FOUND"
-        }
-        Write-Host "Version found (Status: $($headResponse.StatusCode))"
-    } catch {
-        if ($_.Exception.Response.StatusCode -eq 404) {
-            throw "VERSION_NOT_FOUND"
-        }
-        Write-Host "Warning: HEAD request failed, attempting download anyway"
-    }
-    
-    # Download file
-    Write-Host "Downloading... (1-3 minutes)"
-    Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing -TimeoutSec 150
-    
-    # Verify download
-    if (!(Test-Path $output)) {
-        throw "File not found after download"
-    }
-    
-    $fileSize = (Get-Item $output).Length
-    $fileSizeMB = [math]::Round($fileSize/1MB, 2)
-    
-    if ($fileSize -lt 1000) {
-        Remove-Item $output -Force -ErrorAction SilentlyContinue
-        throw "Downloaded file too small ($fileSize bytes)"
-    }
-    
-    Write-Host "SUCCESS: Downloaded $fileSizeMB MB"
-    exit 0
-    
-} catch {
-    $errorMsg = $_.Exception.Message
-    if ($errorMsg -eq "VERSION_NOT_FOUND") {
-        Write-Host "ERROR: Version not found on Zabbix CDN (404)" -ForegroundColor Red
-    } else {
-        Write-Host "ERROR: $errorMsg" -ForegroundColor Red
-    }
-    exit 1
-}
-`;
-}
 
 /**
- * Generate installation PowerShell script
- */
-function generateInstallScript(config) {
-  const { version, downloadUrl, installDir, installerPath, serverIP, serverPort, hostname, psk, pskIdentity } = config;
-  
-  const pskSetup = psk ? `
-    Write-Host 'Configuring PSK encryption...' -ForegroundColor Cyan
-    $pskFile = 'C:\\Program Files\\Zabbix Agent 2\\zabbix_agent2.psk'
-    $configPath = 'C:\\Program Files\\Zabbix Agent 2\\zabbix_agent2.conf'
-    
-    Set-Content -Path $pskFile -Value '${psk}' -NoNewline
-    
-    $config = Get-Content $configPath -Raw
-    $config = $config -replace '# TLSConnect=.*', 'TLSConnect=psk'
-    $config = $config -replace '# TLSAccept=.*', 'TLSAccept=psk'
-    $config = $config -replace '# TLSPSKIdentity=.*', 'TLSPSKIdentity=${pskIdentity || hostname}'
-    $config = $config -replace '# TLSPSKFile=.*', 'TLSPSKFile=C:\\Program Files\\Zabbix Agent 2\\zabbix_agent2.psk'
-    Set-Content -Path $configPath -Value $config
-    
-    Write-Host 'PSK configured successfully' -ForegroundColor Green
-` : '';
-
-  return `
-$ProgressPreference = 'SilentlyContinue'
-$ErrorActionPreference = 'Stop'
-$logPath = '${installDir}\\install-log.txt'
-
-Start-Transcript -Path $logPath -Append
-
-try {
-    # Verify admin rights
-    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    
-    Write-Host "Admin Status: $isAdmin" -ForegroundColor $(if ($isAdmin) { 'Green' } else { 'Red' })
-    if (!$isAdmin) {
-        throw 'Administrator privileges required'
-    }
-    
-    # Create installation directory
-    Write-Host 'Preparing installation directory...' -ForegroundColor Cyan
-    if (!(Test-Path '${installDir}')) {
-        New-Item -ItemType Directory -Path '${installDir}' -Force | Out-Null
-    }
-    
-    # Download installer
-    Write-Host 'Downloading Zabbix Agent ${version}...' -ForegroundColor Cyan
-    Invoke-WebRequest -Uri '${downloadUrl}' -OutFile '${installerPath}' -UseBasicParsing -TimeoutSec 120
-    
-    if (!(Test-Path '${installerPath}')) {
-        throw 'Download failed: Installer not found'
-    }
-    
-    $fileSize = (Get-Item '${installerPath}').Length
-    if ($fileSize -lt 1000) {
-        throw "Downloaded file too small ($fileSize bytes)"
-    }
-    
-    $fileSizeMB = [math]::Round($fileSize/1MB, 2)
-    Write-Host "Downloaded $fileSizeMB MB" -ForegroundColor Green
-    
-    # Run MSI installation
-    Write-Host 'Installing Zabbix Agent...' -ForegroundColor Cyan
-    $msiArgs = @(
-        '/i', '${installerPath}',
-        '/qn', '/norestart',
-        'SERVER=${serverIP}',
-        'SERVERACTIVE=${serverIP}:${serverPort}',
-        'HOSTNAME=${hostname}',
-        'LISTENPORT=10050',
-        'ENABLEPATH=1'
-    )
-    
-    $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
-    
-    if ($process.ExitCode -eq 1625) {
-        throw 'POLICY_BLOCKED: Installation blocked by Group Policy (Error 1625)'
-    }
-    
-    if ($process.ExitCode -ne 0) {
-        throw "MSI installation failed (Exit Code: $($process.ExitCode))"
-    }
-    
-    Write-Host 'Installation completed' -ForegroundColor Green
-    ${pskSetup}
-    
-    # Start service
-    Write-Host 'Starting Zabbix Agent service...' -ForegroundColor Cyan
-    Restart-Service -Name 'Zabbix Agent 2' -Force
-    Start-Sleep -Seconds 3
-    
-    $service = Get-Service -Name 'Zabbix Agent 2'
-    if ($service.Status -ne 'Running') {
-        throw "Service failed to start (Status: $($service.Status))"
-    }
-    
-    Write-Host 'SUCCESS: Zabbix Agent ${version} installed and running' -ForegroundColor Green
-    exit 0
-    
-} catch {
-    Write-Host "ERROR: $_" -ForegroundColor Red
-    exit 1
-} finally {
-    Stop-Transcript
-}
-`;
-}
-
-/**
- * Parse error from PowerShell output
+ * Parse error from installation output
  */
 function parseInstallError(output) {
-  if (output.includes('POLICY_BLOCKED') || output.includes('Error 1625')) {
+  if (output.includes('not allowed to execute') || output.includes('Sorry, user')) {
     return {
       status: 403,
-      error: 'Installation blocked by Group Policy',
-      details: 'Your organization\'s Group Policy is blocking MSI installations. Contact your IT administrator to whitelist Zabbix Agent installations.'
+      error: 'Sudo policy blocked execution',
+      details: 'The SSH user is authenticated but is not permitted by sudoers to run the install command. Grant sudo permission for /bin/sh and the install script path, or use an SSH user with broader sudo access.'
+    };
+  }
+
+  if (output.includes('permission denied') || output.includes('Permission denied')) {
+    return {
+      status: 403,
+      error: 'Permission denied',
+      details: 'Insufficient privileges to install packages. Ensure the user has sudo access.'
     };
   }
   
-  if (output.includes('Administrator privileges required')) {
+  if (output.includes('Repository') && output.includes('not found')) {
     return {
-      status: 403,
-      error: 'Administrator privileges required',
-      details: 'Server must run with administrator privileges to install software on localhost.'
+      status: 404,
+      error: 'Repository not found',
+      details: 'Zabbix repository not available for this RHEL version or the specified version does not exist.'
+    };
+  }
+
+  if (output.includes('Connection refused') || output.includes('Network is unreachable')) {
+    return {
+      status: 503,
+      error: 'Network error',
+      details: 'Cannot reach package repositories or Zabbix server. Check network connectivity.'
     };
   }
   
@@ -243,23 +89,72 @@ function parseInstallError(output) {
 }
 
 /**
- * Check if running with admin privileges (Windows only)
+ * Execute command on remote server via SSH
  */
-async function checkAdminRights() {
-  if (os.platform() !== 'win32') {
-    return true; // Not Windows, assume OK
-  }
+async function executeSSHCommand(conn, command) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    
+    conn.exec(command, (err, stream) => {
+      if (err) return reject(err);
+      
+      stream.on('close', (code) => {
+        resolve({ stdout, stderr, code, success: code === 0 });
+      }).on('data', (data) => {
+        stdout += data.toString();
+      }).stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+    });
+  });
+}
 
-  try {
-    const { stdout } = await execAsync(
-      'powershell -Command "$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if ($currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host \'ADMIN\' } else { Write-Host \'NOT_ADMIN\' }"',
-      { timeout: 5000, windowsHide: true }
-    );
+/**
+ * Upload file to remote server via SFTP
+ */
+async function uploadFileSSH(conn, localPath, remotePath) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+      
+      sftp.fastPut(localPath, remotePath, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  });
+}
 
-    return stdout.includes('ADMIN');
-  } catch {
-    return false;
-  }
+/**
+ * Download file from remote server via SFTP
+ */
+async function downloadFileSSH(conn, remotePath, localPath) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+      
+      sftp.fastGet(remotePath, localPath, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  });
+}
+
+/**
+ * Connect to remote server via SSH
+ */
+async function connectSSH(config) {
+  return new Promise((resolve, reject) => {
+    const conn = new SSHClient();
+    
+    conn.on('ready', () => {
+      resolve(conn);
+    }).on('error', (err) => {
+      reject(err);
+    }).connect(config);
+  });
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -272,7 +167,7 @@ app.use(cors());
 app.use(express.json());
 
 // Logs directory - create in project root
-const LOGS_DIR = path.join(__dirname, '..', 'agent-logs');
+const LOGS_DIR = path.join(__dirname, 'agent-logs');
 
 /**
  * Create log file using shell command
@@ -315,17 +210,13 @@ app.post('/api/log-action', async (req, res) => {
     
     message += `\n========================================`;
 
-    // Create logs directory if it doesn't exist (PowerShell command)
-    const mkdirCommand = `if (!(Test-Path -Path '${LOGS_DIR}')) { New-Item -ItemType Directory -Path '${LOGS_DIR}' -Force | Out-Null }`;
-    await execAsync(`powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command "${mkdirCommand}" 2>&1`, { windowsHide: true });
+    // Create logs directory if it doesn't exist
+    await executeShellCommand(`mkdir -p "${LOGS_DIR}"`);
+    await executeShellCommand(`chmod 755 "${LOGS_DIR}"`);
 
-    // Write to file using PowerShell with proper path escaping
-    const escapedPath = filepath.replace(/'/g, "''");
-    const writeCommand = `Set-Content -Path '${escapedPath}' -Value @'
-${message}
-'@ -Force`;
-    
-    await execAsync(`powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command "${writeCommand}" 2>&1`, { windowsHide: true });
+    // Write to file  
+    await fs.writeFile(filepath, message, 'utf8');
+    await executeShellCommand(`chmod 777 "${filepath}"`);
 
     console.log(`✓ Log file created: ${filename}`);
     
@@ -350,15 +241,22 @@ ${message}
  */
 app.get('/api/logs', async (req, res) => {
   try {
-    const command = `if (Test-Path -Path '${LOGS_DIR}') { Get-ChildItem -Path '${LOGS_DIR}' -File | Select-Object Name, Length, LastWriteTime | ConvertTo-Json }`;
-    const { stdout } = await execAsync(`powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command "${command}" 2>&1`, { windowsHide: true });
+    const result = await executeShellCommand(`find "${LOGS_DIR}" -type f -name "*.txt" -printf "%f %s %T@\\n" 2>/dev/null | head -100`);
     
-    if (stdout.trim()) {
-      const logs = JSON.parse(stdout);
-      res.json({ logs: Array.isArray(logs) ? logs : [logs] });
-    } else {
-      res.json({ logs: [] });
+    const logs = [];
+    if (result.stdout.trim()) {
+      result.stdout.trim().split('\n').forEach(line => {
+        const parts = line.split(' ');
+        if (parts.length >= 3) {
+          const name = parts[0];
+          const size = parseInt(parts[1]);
+          const timestamp = new Date(parseFloat(parts[2]) * 1000).toISOString();
+          logs.push({ Name: name, Length: size, LastWriteTime: timestamp });
+        }
+      });
     }
+    
+    res.json({ logs });
   } catch (error) {
     console.error('Error listing logs:', error);
     res.json({ logs: [] });
@@ -378,13 +276,12 @@ app.get('/api/logs/:filename', async (req, res) => {
       return res.status(400).json({ error: 'Invalid filename' });
     }
     
-    const command = `if (Test-Path -Path '${filepath}') { Get-Content -Path '${filepath}' -Raw } else { Write-Host 'File not found' -ForegroundColor Red; exit 1 }`;
-    const { stdout } = await execAsync(`powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command "${command}" 2>&1`, { windowsHide: true });
+    const result = await executeShellCommand(`test -f "${filepath}" && cat "${filepath}"`);
     
-    if (stdout) {
+    if (result.success && result.stdout) {
       res.json({ 
         success: true,
-        content: stdout,
+        content: result.stdout,
         filename: filename
       });
     } else {
@@ -400,72 +297,87 @@ app.get('/api/logs/:filename', async (req, res) => {
 });
 
 /**
- * Get available Zabbix agent versions from official Zabbix download page
+ * Get available Zabbix agent versions for RHEL from official Zabbix repository
+ * Uses native package manager for reliability instead of web scraping
  */
 app.get('/api/agent-versions', async (req, res) => {
   try {
-    // Fetch from official Zabbix download agents page
-    const zabbixDownloadUrl = 'https://www.zabbix.com/download_agents';
+    console.log('Fetching available Zabbix versions for RHEL...');
     
-    console.log('Fetching Zabbix agent versions from official download page...');
+    // Get RHEL version
+    const rhelResult = await executeShellCommand('rpm -E %{rhel} 2>/dev/null || echo "8"');
+    const rhelVersion = rhelResult.stdout.trim() || '8';
     
-    // Use native fetch to get the page content
-    const response = await fetch(zabbixDownloadUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    console.log(`Detected RHEL version: ${rhelVersion}`);
+    
+    // Fetch available versions from Zabbix repository - include all major versions
+    const majorVersions = ['7.8', '7.6', '7.4', '7.2', '7.0', '6.4', '6.0', '5.0'];
+    const allVersions = [];
+    let usedFallback = false;
+    
+    for (const majorVersion of majorVersions) {
+      try {
+        // Versions 7.2+ use /stable/ path, older versions don't
+        const majorNum = parseFloat(majorVersion);
+        const stablePath = majorNum >= 7.2 ? '/stable' : '';
+        const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}${stablePath}/rhel/${rhelVersion}/x86_64/`;
+        // Look for actual zabbix-agent2 packages, not zabbix-release
+        const result = await executeShellCommand(`curl -s "${repoUrl}" | grep -oP 'zabbix-agent2-[0-9.]+' | grep -oP '[0-9.]+' | sort -uV | head -20`);
+        
+        if (result.success && result.stdout.trim()) {
+          const versions = result.stdout.trim().split('\n').filter(v => v.match(/^\d+\.\d+\.\d+$/));
+          allVersions.push(...versions);
+          console.log(`Found ${versions.length} versions for ${majorVersion}`);
+        }
+      } catch (error) {
+        console.log(`Could not fetch versions for ${majorVersion}: ${error.message}`);
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const html = await response.text();
-    
-    // Extract version numbers using regex
-    // Looking for patterns like "zabbix_agent2-7.0.7-windows-amd64-openssl.msi"
-    const versionRegex = /zabbix_agent2-(\d+\.\d+\.\d+)-windows-amd64-openssl\.msi/g;
-    const versions = new Set();
-    
-    let match;
-    while ((match = versionRegex.exec(html)) !== null) {
-      versions.add(match[1]);
+    // If curl method fails, provide known stable versions (updated March 2026)
+    if (allVersions.length === 0) {
+      usedFallback = true;
+      console.log('⚠️  Scraping failed - Using fallback version list');
+      allVersions.push(
+        '7.4.7', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.2', '7.4.1', '7.4.0',
+        '7.2.0', '7.0.6', '7.0.5', '7.0.4',
+        '6.4.18', '6.4.17', '6.4.16', '6.4.15',
+        '6.0.35', '6.0.34', '6.0.33', '6.0.32',
+        '5.0.45', '5.0.44', '5.0.43'
+      );
+    } else {
+      console.log(`✓ Successfully scraped ${allVersions.length} versions from Zabbix repos`);
     }
     
-    const versionArray = Array.from(versions);
-    
-    console.log(`Found ${versionArray.length} versions from Zabbix download page`);
-    
-    if (versionArray.length === 0) {
-      throw new Error('No versions found on Zabbix download page');
-    }
-    
-    // Sort versions in descending order (newest first)
-    const sortedVersions = versionArray.sort((a, b) => {
+    // Remove duplicates and sort
+    const uniqueVersions = [...new Set(allVersions)];
+    const sortedVersions = uniqueVersions.sort((a, b) => {
       const aParts = a.split('.').map(Number);
       const bParts = b.split('.').map(Number);
       for (let i = 0; i < 3; i++) {
         if (aParts[i] !== bParts[i]) return bParts[i] - aParts[i];
       }
       return 0;
-    }).slice(0, 30); // Limit to 30 most recent versions
+    }).slice(0, 30);
     
-    console.log(`Returning ${sortedVersions.length} installable versions:`, sortedVersions.slice(0, 8).join(', '), '...');
+    console.log(`Returning ${sortedVersions.length} available versions for RHEL ${rhelVersion}`);
+    console.log(`Latest version: ${sortedVersions[0]}`);
     
     res.json({
       success: true,
       versions: sortedVersions,
       count: sortedVersions.length,
-      source: 'zabbix-official'
+      source: usedFallback ? 'fallback' : 'zabbix-rhel-repo-scraped',
+      rhelVersion: rhelVersion,
+      latest: sortedVersions[0]
     });
     
   } catch (error) {
     console.error('Error fetching agent versions:', error.message);
     
-    // Return error instead of fallback
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch versions from Zabbix download page',
+      error: 'Failed to fetch versions from Zabbix repository',
       details: error.message,
       versions: [],
       count: 0
@@ -474,206 +386,344 @@ app.get('/api/agent-versions', async (req, res) => {
 });
 
 /**
- * Download Zabbix agent installer
+ * Download Zabbix agent RPM package for RHEL
  */
 app.get('/api/download-agent/:version', async (req, res) => {
   try {
     const { version } = req.params;
     
-    if (!version) {
+    console.log(`\n[DOWNLOAD] Requested version: ${version}`);
+    
+    // Validate version format
+    if (!version.match(/^\d+\.\d+\.\d+$/)) {
       return res.status(400).json({ 
-        error: 'Version required',
-        details: 'Please specify a version to download'
+        error: 'Invalid version format',
+        details: 'Version must be in format X.Y.Z (e.g., 7.0.5)'
       });
     }
     
-    // Build download URL
-    const majorMinor = version.split('.').slice(0, 2).join('.');
-    const filename = `zabbix_agent2-${version}-windows-amd64-openssl.msi`;
-    const downloadUrl = `https://cdn.zabbix.com/zabbix/binaries/stable/${majorMinor}/${version}/${filename}`;
-    const outputPath = path.join(os.tmpdir(), filename);
+    // Get RHEL version
+    const rhelResult = await executeShellCommand('rpm -E %{rhel} 2>/dev/null || echo "8"');
+    const rhelVersion = rhelResult.stdout.trim() || '8';
     
-    console.log(`\n[DOWNLOAD] Version ${version}`);
-    console.log(`[DOWNLOAD] URL: ${downloadUrl}`);
-    console.log(`[DOWNLOAD] Output: ${outputPath}\n`);
+    console.log(`[DOWNLOAD] RHEL version: ${rhelVersion}`);
     
-    // Generate and execute download script
-    const script = generateDownloadScript(downloadUrl, outputPath);
-    const result = await executePowerShellScript(script, { timeout: 180000 });
+    // Determine major version (e.g., 7.0 from 7.0.5)
+    const majorVersion = version.split('.').slice(0, 2).join('.');
+    const majorNum = parseFloat(majorVersion);
     
-    console.log(`[DOWNLOAD] Output:\n${result.stdout}`);
+    // Create download directory if it doesn't exist
+    const downloadDir = path.join(__dirname, 'downloads');
+    await executeShellCommand(`mkdir -p "${downloadDir}"`);
+    await executeShellCommand(`chmod 755 "${downloadDir}"`);
     
-    // Check results
-    if (result.stdout.includes('SUCCESS')) {
-      console.log(`[DOWNLOAD] ✓ Success\n`);
+    // Construct repository URL - versions 7.2+ use /stable/ path, older versions don't
+    const stablePath = majorNum >= 7.2 ? '/stable' : '';
+    const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}${stablePath}/rhel/${rhelVersion}/x86_64/`;
+    
+    console.log(`[DOWNLOAD] Checking repository: ${repoUrl}`);
+    
+    // Search for the package in the repository
+    // Package format: zabbix-agent2-{version}-release{N}.el{rhelVersion}.x86_64.rpm
+    // Get the latest release if multiple exist (e.g., release1, release2)
+    const searchCmd = `curl -s "${repoUrl}" | grep -oP "zabbix-agent2-${version}-release[0-9]+\\.el${rhelVersion}\\.x86_64\\.rpm" | sort -V | tail -1`;
+    const searchResult = await executeShellCommand(searchCmd);
+    
+    if (!searchResult.success || !searchResult.stdout.trim()) {
+      console.log(`[DOWNLOAD] ✗ Package not found in repository`);
+      return res.status(404).json({
+        error: 'Package not found',
+        details: `Zabbix Agent ${version} not found in RHEL ${rhelVersion} repository. Verify the version exists.`,
+        repoUrl: repoUrl
+      });
+    }
+    
+    const packageName = searchResult.stdout.trim();
+    const packageUrl = `${repoUrl}${packageName}`;
+    const downloadPath = path.join(downloadDir, packageName);
+    
+    console.log(`[DOWNLOAD] Package: ${packageName}`);
+    console.log(`[DOWNLOAD] URL: ${packageUrl}`);
+    
+    // Check if already downloaded
+    const checkExisting = await executeShellCommand(`test -f "${downloadPath}" && echo "exists" || echo "not_found"`);
+    
+    if (checkExisting.stdout.trim() === 'exists') {
+      console.log(`[DOWNLOAD] ✓ Package already downloaded`);
+      
+      // Get file size
+      const statResult = await executeShellCommand(`stat -c%s "${downloadPath}" 2>/dev/null || stat -f%z "${downloadPath}"`);
+      const fileSize = parseInt(statResult.stdout.trim()) || 0;
+      
       return res.json({
         success: true,
-        message: `Zabbix Agent ${version} downloaded successfully`,
-        filename,
-        path: outputPath,
-        version
+        message: 'Package already downloaded',
+        path: downloadPath,
+        packageName: packageName,
+        size: fileSize,
+        cached: true
       });
     }
     
-    // Handle specific errors
-    if (result.stdout.includes('VERSION_NOT_FOUND')) {
-      console.log(`[DOWNLOAD] ✗ Version not found\n`);
-      return res.status(404).json({
-        error: 'Version not found',
-        details: `Version ${version} is not available on Zabbix CDN. It may not exist or may not be available for Windows.`
+    // Download the package
+    console.log(`[DOWNLOAD] Downloading package...`);
+    
+    const downloadCmd = `curl -f -L --progress-bar "${packageUrl}" -o "${downloadPath}"`;
+    const downloadResult = await executeShellCommand(downloadCmd, { timeout: 300000 }); // 5 minutes
+    
+    if (!downloadResult.success) {
+      console.log(`[DOWNLOAD] ✗ Download failed`);
+      return res.status(500).json({
+        error: 'Download failed',
+        details: downloadResult.stderr || 'Failed to download package from repository',
+        packageUrl: packageUrl
       });
     }
     
-    // Generic failure
-    const errorMsg = result.error || result.stdout.substring(result.stdout.lastIndexOf('ERROR'));
-    console.log(`[DOWNLOAD] ✗ Failed: ${errorMsg}\n`);
+    // Verify download
+    const verifyResult = await executeShellCommand(`test -f "${downloadPath}" && stat -c%s "${downloadPath}" 2>/dev/null || stat -f%z "${downloadPath}"`);
     
-    res.status(500).json({
-      error: 'Download failed',
-      details: errorMsg || 'Unknown error occurred during download'
+    if (!verifyResult.success) {
+      console.log(`[DOWNLOAD] ✗ Downloaded file verification failed`);
+      return res.status(500).json({
+        error: 'Download verification failed',
+        details: 'File downloaded but could not be verified'
+      });
+    }
+    
+    const fileSize = parseInt(verifyResult.stdout.trim()) || 0;
+    
+    // Set permissions on downloaded RPM file
+    await executeShellCommand(`chmod 755 "${downloadPath}"`);
+    
+    console.log(`[DOWNLOAD] ✓ Downloaded successfully (${(fileSize / 1024 / 1024).toFixed(2)} MB)\n`);
+    
+    res.json({
+      success: true,
+      message: `Zabbix Agent ${version} RPM package downloaded successfully`,
+      path: downloadPath,
+      packageName: packageName,
+      size: fileSize,
+      cached: false,
+      repoUrl: packageUrl
     });
     
   } catch (error) {
     console.error(`[DOWNLOAD] ✗ Exception: ${error.message}\n`);
     
-    // Categorize errors
-    let details = error.message;
-    if (error.message.includes('ETIMEDOUT') || error.message.includes('timeout')) {
-      details = 'Download timeout - CDN may be slow or unreachable';
-    } else if (error.message.includes('ENOTFOUND')) {
-      details = 'Cannot reach Zabbix CDN - check internet connection';
-    }
-    
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Download failed',
-      details
+      details: error.message
     });
   }
 });
 
 /**
- * Install Zabbix agent on localhost
+ * Install Zabbix agent on remote RHEL server via SSH
+ * Connects to remote server, uploads installation script, executes it, and retrieves logs
  */
-app.post('/api/install-localhost', async (req, res) => {
+app.post('/api/install-remote', async (req, res) => {
+  console.log('\n[SSH-INSTALL] ========================================');
+  console.log('[SSH-INSTALL] /api/install-remote endpoint HIT!');
+  console.log('[SSH-INSTALL] ========================================\n');
+  
+  let connection = null;
+  
   try {
-    const { version, serverIP, serverPort = 10051, hostname, psk, pskIdentity, adminUsername, adminPassword } = req.body;
+    const { 
+      host,           // Remote server IP/hostname
+      sshPort = 22,   // SSH port
+      sshUser,        // SSH username  
+      sshPassword,    // SSH password
+      version,        // Zabbix version
+      serverIP,       // Zabbix server IP
+      serverPort = 10051,  // Zabbix server port
+      hostname        // Agent hostname
+    } = req.body;
+    
+    console.log('[SSH-INSTALL] Parameters:');
+    console.log(`  Host: ${host}:${sshPort}`);
+    console.log(`  SSH User: ${sshUser}`);
+    console.log(`  Zabbix Version: ${version}`);
+    console.log(`  Zabbix Server: ${serverIP}:${serverPort}`);
+    console.log(`  Agent Hostname: ${hostname}\n`);
     
     // Validate required fields
-    if (!version || !serverIP || !hostname) {
+    if (!host || !sshUser || !sshPassword || !version || !serverIP || !hostname) {
       return res.status(400).json({ 
         error: 'Missing required fields',
-        details: 'version, serverIP, and hostname are required'
+        details: 'host, sshUser, sshPassword, version, serverIP, and hostname are required'
       });
     }
     
-    if (!adminUsername || !adminPassword) {
-      return res.status(400).json({ 
-        error: 'Missing admin credentials',
-        details: 'adminUsername and adminPassword are required'
+    // Security: Input validation
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+      return res.status(400).json({
+        error: 'Invalid version format',
+        details: 'Version must be in format X.Y.Z (e.g., 7.4.6)'
       });
     }
     
-    // Check if server has admin rights (warning only)
-    const hasAdmin = await checkAdminRights();
-    if (!hasAdmin) {
-      console.log('[INSTALL] ⚠️  Warning: Server not running as admin - installation may require elevated credentials\n');
+    if (!/^[a-zA-Z0-9.-]+$/.test(serverIP)) {
+      return res.status(400).json({
+        error: 'Invalid server IP/hostname',
+        details: 'Server IP must contain only alphanumeric characters, dots, and hyphens'
+      });
     }
     
-    console.log(`\n[INSTALL] Version: ${version}`);
-    console.log(`[INSTALL] Server: ${serverIP}:${serverPort}`);
-    console.log(`[INSTALL] Hostname: ${hostname}`);
-    console.log(`[INSTALL] PSK: ${psk ? 'Enabled' : 'Disabled'}`);
-    console.log(`[INSTALL] Admin User: ${adminUsername}\n`);
+    if (!/^[a-zA-Z0-9.-]+$/.test(hostname)) {
+      return res.status(400).json({
+        error: 'Invalid hostname',
+        details: 'Hostname must contain only alphanumeric characters, dots, and hyphens'
+      });
+    }
     
-    // Build installation config
-    const majorMinor = version.split('.').slice(0, 2).join('.');
-    const installDir = 'C:\\ZabbixInstall';
-    const config = {
-      version,
-      downloadUrl: `https://cdn.zabbix.com/zabbix/binaries/stable/${majorMinor}/${version}/zabbix_agent2-${version}-windows-amd64-openssl.msi`,
-      installDir,
-      installerPath: `${installDir}\\zabbix_agent2-${version}-windows-amd64-openssl.msi`,
-      serverIP,
-      serverPort,
-      hostname,
-      psk,
-      pskIdentity: pskIdentity || hostname
-    };
+    if (serverPort < 1 || serverPort > 65535) {
+      return res.status(400).json({
+        error: 'Invalid port',
+        details: 'Port must be between 1 and 65535'
+      });
+    }
     
-    // Generate installation script
-    const installScript = generateInstallScript(config);
+    // Connect to remote server via SSH
+    console.log(`[SSH-INSTALL] Connecting to ${host}:${sshPort}...`);
     
-    // Execute via scheduled task with admin credentials
-    const taskName = `ZabbixInstall_${Date.now()}`;
-    const escapedScript = installScript.replace(/'/g, "''");
-    const escapedPassword = adminPassword.replace(/'/g, "''");
+    try {
+      connection = await connectSSH({
+        host,
+        port: sshPort,
+        username: sshUser,
+        password: sshPassword
+      });
+      console.log(`[SSH-INSTALL] ✓ SSH connected successfully\n`);
+    } catch (sshErr) {
+      console.error(`[SSH-INSTALL] ✗ SSH connection failed: ${sshErr.message}`);
+      return res.status(503).json({
+        error: 'SSH connection failed',
+        details: `Cannot connect to ${host}:${sshPort} - ${sshErr.message}`
+      });
+    }
     
-    const taskCommand = `
-      $securePassword = ConvertTo-SecureString '${escapedPassword}' -AsPlainText -Force
-      $credential = New-Object System.Management.Automation.PSCredential('${adminUsername}', $securePassword)
-      $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -Command \`"${escapedScript}\`""
-      $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(2)
-      $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    // Define remote paths (using /tmp/ instead of __dirname)
+    const timestamp = Date.now();
+    const remoteScriptPath = `/tmp/install-zabbix-rhel-${timestamp}.sh`;
+    const remoteLogPattern = `/tmp/zabbix_install_*.log`;
+    const localScriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
+    const localLogsDir = path.join(__dirname, 'agent-logs');
+    
+    // Ensure local logs directory exists
+    await executeShellCommand(`mkdir -p "${localLogsDir}"`);
+    await executeShellCommand(`chmod 755 "${localLogsDir}"`);
+    
+    // Upload installation script to remote server
+    console.log(`[SSH-INSTALL] Uploading script: ${localScriptPath} → ${remoteScriptPath}`);
+    
+    try {
+      await uploadFileSSH(connection, localScriptPath, remoteScriptPath);
+      console.log(`[SSH-INSTALL] ✓ Script uploaded successfully`);
       
-      Register-ScheduledTask -TaskName '${taskName}' -Action $action -Trigger $trigger -Settings $settings -User $credential.UserName -Password '${escapedPassword}' -Force | Out-Null
-      Start-ScheduledTask -TaskName '${taskName}'
-      
-      # Wait for completion
-      $maxWait = 300
-      $elapsed = 0
-      while ($elapsed -lt $maxWait) {
-        Start-Sleep -Seconds 3
-        $elapsed += 3
-        $taskInfo = Get-ScheduledTaskInfo -TaskName '${taskName}' -ErrorAction SilentlyContinue
-        if ($taskInfo -and $taskInfo.LastTaskResult -ne 0x41301) { break }
+      // Set executable permissions on remote script
+      await executeSSHCommand(connection, `chmod 755 ${remoteScriptPath}`);
+      console.log(`[SSH-INSTALL] ✓ Script permissions set to 755 (rwxr-xr-x)\n`);
+    } catch (uploadErr) {
+      console.error(`[SSH-INSTALL] ✗ Upload failed: ${uploadErr.message}`);
+      connection.end();
+      return res.status(500).json({
+        error: 'Script upload failed',
+        details: uploadErr.message
+      });
+    }
+    
+    // Execute installation on remote server with sudo password
+    // Use echo with -S flag to pass password to sudo via stdin
+    // Use 'sh' for POSIX compatibility (works with restricted sudoers)
+    const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
+    const installCommand = `echo '${escapedPassword}' | sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
+    console.log(`[SSH-INSTALL] Executing installation command:`);
+    console.log(`[SSH-INSTALL] sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
+    
+    let result;
+    try {
+      result = await executeSSHCommand(connection, installCommand);
+      console.log(`[SSH-INSTALL] Command execution completed`);
+      console.log(`[SSH-INSTALL] Exit code: ${result.code}`);
+      console.log(`[SSH-INSTALL] Output:\n${result.stdout}`);
+      if (result.stderr) {
+        console.log(`[SSH-INSTALL] Errors:\n${result.stderr}`);
       }
+    } catch (execErr) {
+      console.error(`[SSH-INSTALL] ✗ Execution failed: ${execErr.message}`);
+      connection.end();
+      return res.status(500).json({
+        error: 'Remote execution failed',
+        details: execErr.message
+      });
+    }
+    
+    // Retrieve installation log from remote server
+    console.log(`[SSH-INSTALL] Retrieving installation log...`);
+    
+    try {
+      // Find the latest log file
+      const findLogResult = await executeSSHCommand(connection, `ls -t ${remoteLogPattern} 2>/dev/null | head -1`);
+      const remoteLogPath = findLogResult.stdout.trim();
       
-      Unregister-ScheduledTask -TaskName '${taskName}' -Confirm:$false -ErrorAction SilentlyContinue
-      Write-Host 'Task completed'
-    `.trim();
-    
-    // Execute task
-    let taskResult;
-    try {
-      taskResult = await execAsync(
-        `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${taskCommand}"`,
-        { timeout: 420000, maxBuffer: 5 * 1024 * 1024, windowsHide: true }
-      );
-    } catch (error) {
-      taskResult = { stdout: error.stdout || '', stderr: error.stderr || '' };
+      if (remoteLogPath) {
+        const logFilename = `${hostname}_install_${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+        const localLogPath = path.join(localLogsDir, logFilename);
+        
+        await downloadFileSSH(connection, remoteLogPath, localLogPath);
+        await executeShellCommand(`chmod 777 "${localLogPath}"`);
+        
+        console.log(`[SSH-INSTALL] ✓ Log retrieved: ${logFilename}\n`);
+      } else {
+        console.log(`[SSH-INSTALL] ⚠ No installation log found on remote server\n`);
+      }
+    } catch (logErr) {
+      console.warn(`[SSH-INSTALL] ⚠ Could not retrieve log: ${logErr.message}`);
     }
     
-    console.log(`[INSTALL] Task output:\n${taskResult.stdout}`);
-    
-    // Read installation log
-    const logPath = path.join(installDir, 'install-log.txt');
-    let logContent = '';
+    // Cleanup remote script
     try {
-      logContent = await fs.readFile(logPath, 'utf8');
-      console.log(`[INSTALL] Log:\n${logContent}`);
-    } catch (logError) {
-      console.log(`[INSTALL] Could not read log: ${logError.message}`);
+      const cleanupCommand = `echo '${escapedPassword}' | sudo -S rm -f ${remoteScriptPath}`;
+      await executeSSHCommand(connection, cleanupCommand);
+      console.log(`[SSH-INSTALL] ✓ Remote cleanup completed`);
+    } catch (cleanErr) {
+      console.warn(`[SSH-INSTALL] ⚠ Cleanup failed: ${cleanErr.message}`);
     }
     
-    const combinedOutput = logContent || taskResult.stdout;
+    // Close SSH connection
+    connection.end();
+    console.log(`[SSH-INSTALL] ✓ SSH connection closed\n`);
+    
+    const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
     
     // Check for success
-    if (combinedOutput.includes('SUCCESS') || combinedOutput.includes('Service started successfully')) {
-      console.log(`[INSTALL] ✓ Success\n`);
+    if (result.success && (combinedOutput.includes('successfully installed') || combinedOutput.includes('Installation completed') || combinedOutput.includes('INSTALLATION COMPLETED'))) {
+      console.log(`[SSH-INSTALL] ✓ Installation SUCCESS\n`);
       return res.json({
         success: true,
-        message: `Zabbix Agent ${version} installed successfully`,
-        output: combinedOutput
+        message: `Zabbix Agent ${version} installed successfully on ${host}`,
+        output: combinedOutput,
+        host: host
       });
     }
     
     // Parse and return error
-    console.log(`[INSTALL] ✗ Failed\n`);
+    console.log(`[SSH-INSTALL] ✗ Installation FAILED\n`);
     const errorInfo = parseInstallError(combinedOutput);
-    return res.status(errorInfo.status).json(errorInfo);
+    return res.status(errorInfo.status).json({
+      ...errorInfo,
+      host: host,
+      output: combinedOutput
+    });
     
   } catch (error) {
-    console.error(`[INSTALL] ✗ Exception: ${error.message}\n`);
+    console.error(`[SSH-INSTALL] ✗ Exception: ${error.message}\n`);
+    
+    if (connection) {
+      connection.end();
+    }
     
     res.status(500).json({
       error: 'Installation failed',
@@ -684,60 +734,72 @@ app.post('/api/install-localhost', async (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    platform: 'RHEL',
+    version: '2.0.0',
+    features: 'DNF-only, PSK-removed, 755-permissions, detailed-logging',
+    timestamp: new Date().toISOString() 
+  });
 });
 
 /**
- * Cleanup old temp files (PowerShell scripts and XML files)
+ * Check RHEL system information
  */
-app.post('/api/cleanup-temp', async (req, res) => {
+app.get('/api/system-info', async (req, res) => {
   try {
-    const tempDir = os.tmpdir();
+    const results = {};
     
-    // PowerShell script to clean up old temp files
-    const cleanupScript = `
-      $tempDir = '${tempDir}'
-      $patterns = @('fetch-versions-*.ps1', 'download-zabbix-*.ps1', '*-CliXml-*.xml')
-      $deletedCount = 0
-      
-      foreach ($pattern in $patterns) {
-        $files = Get-ChildItem -Path $tempDir -Filter $pattern -ErrorAction SilentlyContinue
-        foreach ($file in $files) {
-          try {
-            # Only delete files older than 1 hour
-            if ($file.LastWriteTime -lt (Get-Date).AddHours(-1)) {
-              Remove-Item -Path $file.FullName -Force
-              $deletedCount++
-            }
-          } catch {
-            # Ignore errors for files in use
-          }
-        }
-      }
-      
-      Write-Output "Deleted $deletedCount temp files"
-    `;
+    // Get OS information
+    const osResult = await executeShellCommand('cat /etc/redhat-release 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d \'"\'');
+    results.os = osResult.stdout.trim() || 'Unknown RHEL-based OS';
     
-    const tempScriptPath = path.join(os.tmpdir(), `cleanup-${Date.now()}.ps1`);
-    await fs.writeFile(tempScriptPath, cleanupScript, 'utf8');
+    // Get RHEL version
+    const rhelResult = await executeShellCommand('rpm -E %{rhel} 2>/dev/null || echo "unknown"');
+    results.rhelVersion = rhelResult.stdout.trim();
     
-    const { stdout } = await execAsync(`powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command "& '${tempScriptPath}' *>&1 | Out-String"`, {
-      timeout: 10000,
-      windowsHide: true
-    });
+    // Check if Zabbix agent is already installed
+    const zabbixResult = await executeShellCommand('rpm -qa | grep zabbix-agent2 || echo "not_installed"');
+    results.zabbixInstalled = !zabbixResult.stdout.includes('not_installed');
+    results.installedVersion = zabbixResult.stdout.includes('not_installed') ? null : zabbixResult.stdout.trim();
     
-    // Clean up the cleanup script itself
-    try {
-      await fs.unlink(tempScriptPath);
-    } catch {
-      // Ignore
+    // Check if service is running
+    if (results.zabbixInstalled) {
+      const serviceResult = await executeShellCommand('systemctl is-active zabbix-agent2 2>/dev/null || echo "inactive"');
+      results.zabbixRunning = serviceResult.stdout.trim() === 'active';
     }
     
-    console.log('Temp cleanup:', stdout);
+    // Check sudo privileges (will require password prompt in UI)
+    const sudoResult = await executeShellCommand('timeout 1 sudo -n true 2>/dev/null && echo "passwordless" || echo "password_required"');
+    results.sudoAccess = sudoResult.stdout.includes('passwordless') ? 'passwordless' : 'password_required';
     
     res.json({
       success: true,
-      message: stdout.trim()
+      system: results
+    });
+    
+  } catch (error) {
+    console.error('Error getting system info:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get system information',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * Cleanup temporary files
+ */
+app.post('/api/cleanup-temp', async (req, res) => {
+  try {
+    const result = await executeShellCommand('find /tmp -name "zabbix_install_*.sh" -mtime +0 -delete 2>/dev/null; find /tmp -name "zabbix_install_*.log" -mtime +1 -delete 2>/dev/null; echo "Cleanup completed"');
+    
+    console.log('Temp cleanup:', result.stdout);
+    
+    res.json({
+      success: true,
+      message: result.stdout.trim()
     });
   } catch (error) {
     console.error('Error during cleanup:', error);
@@ -749,18 +811,24 @@ app.post('/api/cleanup-temp', async (req, res) => {
 });
 
 app.listen(PORT, async () => {
-  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`📁 Logs directory: ${LOGS_DIR}`);
+  const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
   
-  // Check admin status
-  const hasAdmin = await checkAdminRights();
-  if (hasAdmin) {
-    console.log(`✅ Running with Administrator privileges`);
-  } else {
-    console.log(`⚠️  Running WITHOUT Administrator privileges`);
-    console.log(`   → Downloads will work`);
-    console.log(`   → Localhost installation will fail (requires admin)`);
-    console.log(`   → To enable: Run as Administrator or use .\\start-server-admin.ps1`);
-  }
+  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
+  console.log(`🐧 Platform: RHEL-based Linux`);  
+  console.log(`📁 Logs directory: ${LOGS_DIR}`);
+  console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
+  console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
   console.log();
+  
+  // Test /tmp/ write access
+  const testLog = `/tmp/backend_test_${Date.now()}.log`;
+  try {
+    await fs.writeFile(testLog, `Backend started at ${new Date().toISOString()}\n`);
+    await executeShellCommand(`chmod 777 ${testLog}`);
+    console.log(`✅ /tmp/ directory is writable (test file: ${testLog})`);
+  } catch (err) {
+    console.error(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`);
+  }
+  
+  console.log('✨ Backend ready to accept SSH remote installation requests\n');
 });

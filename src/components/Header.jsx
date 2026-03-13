@@ -13,7 +13,7 @@ const Header = ({ onRefresh, loading, lastUpdated, onNavigate, currentView }) =>
             className="header-logo"
           />
           <div className="header-titles">
-            <h1 className="header-title">Zabbix Agent Management Portal</h1>
+            <h1 className="header-title">Zabbix Agent Management Portal-3</h1>
             <p className="header-subtitle">Centralized Agent Deployment & Monitoring</p>
           </div>
         </div>

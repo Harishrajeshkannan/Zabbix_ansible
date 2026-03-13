@@ -1,40 +1,64 @@
 import { useState, useEffect } from 'react';
+import { fetchAgentVersions } from '../services/backendService';
 import './VersionSelector.css';
 
 const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentVersion }) => {
   const [versions, setVersions] = useState([]);
-  const [selectedVersion, setSelectedVersion] = useState('');
   const [loading, setLoading] = useState(true);
+  const [formData, setFormData] = useState({
+    version: '',
+    serverIP: '',
+    serverPort: '10051',
+    hostname: hostname || 'localhost'
+  });
 
   useEffect(() => {
     if (isOpen) {
       fetchVersions();
+      setFormData(prev => ({
+        ...prev,
+        hostname: hostname || 'localhost'
+      }));
     }
-  }, [isOpen]);
+  }, [isOpen, hostname]);
 
   const fetchVersions = async () => {
     setLoading(true);
     try {
-      const { fetchAgentVersions } = await import('../services/backendService');
       const data = await fetchAgentVersions();
       setVersions(data.versions || []);
       if (data.versions && data.versions.length > 0) {
-        setSelectedVersion(data.versions[0]); // Select latest by default
+        setFormData(prev => ({
+          ...prev,
+          version: data.versions[0] // Select latest by default
+        }));
       }
     } catch (error) {
       console.error('Failed to fetch versions:', error);
-      // Fallback versions
-      const fallbackVersions = ['7.4.5', '7.4.4', '7.4.3', '7.4.2', '7.4.1', '7.4.0'];
+      // Fallback versions (updated March 2026)
+      const fallbackVersions = ['7.4.7', '7.4.6', '7.4.5', '7.4.4', '7.4.3', '7.4.2', '7.4.1', '7.4.0'];
       setVersions(fallbackVersions);
-      setSelectedVersion(fallbackVersions[0]);
+      setFormData(prev => ({
+        ...prev,
+        version: fallbackVersions[0]
+      }));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleConfirm = () => {
-    if (selectedVersion) {
-      onSelect(selectedVersion);
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleConfirm = (e) => {
+    e.preventDefault();
+    if (formData.version && formData.serverIP) {
+      onSelect(formData);
       onClose();
     }
   };
@@ -45,13 +69,12 @@ const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentV
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Select Zabbix Agent Version</h2>
+          <h2>{action === 'install' ? 'Install' : 'Update'} Zabbix Agent</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         
-        <div className="modal-body">
+        <form onSubmit={handleConfirm} className="modal-body">
           <div className="version-info">
-            <p><strong>Host:</strong> {hostname}</p>
             <p><strong>Action:</strong> {action === 'install' ? 'Install' : 'Update'}</p>
             {currentVersion && action === 'update' && (
               <p><strong>Current Version:</strong> {currentVersion}</p>
@@ -62,41 +85,82 @@ const VersionSelector = ({ isOpen, onClose, onSelect, action, hostname, currentV
             <div className="version-loading">Loading available versions...</div>
           ) : (
             <>
-              <label htmlFor="version-select" className="version-label">
-                Choose Version to {action === 'install' ? 'Install' : 'Update To'}:
-              </label>
-              <select
-                id="version-select"
-                className="version-select"
-                value={selectedVersion}
-                onChange={(e) => setSelectedVersion(e.target.value)}
-              >
-                {versions.map((version) => (
-                  <option key={version} value={version}>
-                    {version} {version === versions[0] ? '(Latest)' : ''}
-                  </option>
-                ))}
-              </select>
-              
-              <div className="version-count">
-                {versions.length} versions available
+              <div className="form-group">
+                <label htmlFor="version-select" className="version-label">
+                  Zabbix Agent Version *
+                </label>
+                <select
+                  id="version-select"
+                  name="version"
+                  className="version-select"
+                  value={formData.version}
+                  onChange={handleChange}
+                  required
+                >
+                  {versions.map((version) => (
+                    <option key={version} value={version}>
+                      {version} {version === versions[0] ? '(Latest)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <small className="version-count">{versions.length} versions available</small>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="serverIP">Zabbix Server IP/Hostname *</label>
+                <input
+                  type="text"
+                  id="serverIP"
+                  name="serverIP"
+                  value={formData.serverIP}
+                  onChange={handleChange}
+                  placeholder="192.168.1.100 or zabbix.example.com"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="serverPort">Zabbix Server Port</label>
+                <input
+                  type="number"
+                  id="serverPort"
+                  name="serverPort"
+                  value={formData.serverPort}
+                  onChange={handleChange}
+                  min="1"
+                  max="65535"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="hostname">Agent Hostname</label>
+                <input
+                  type="text"
+                  id="hostname"
+                  name="hostname"
+                  value={formData.hostname}
+                  onChange={handleChange}
+                  placeholder="localhost or hostname"
+                  required
+                />
               </div>
             </>
           )}
-        </div>
 
-        <div className="modal-footer">
-          <button className="btn btn-cancel" onClick={onClose}>
-            Cancel
-          </button>
-          <button 
-            className="btn btn-confirm" 
-            onClick={handleConfirm}
-            disabled={!selectedVersion || loading}
-          >
-            {action === 'install' ? 'Install' : 'Update'}
-          </button>
-        </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-cancel" onClick={onClose}>
+              Cancel
+            </button>
+            <button 
+              type="submit"
+              className="btn btn-confirm" 
+              disabled={!formData.version || !formData.serverIP || loading}
+            >
+              {action === 'install' ? 'Install' : 'Update'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ import VersionSelector from './components/VersionSelector';
 import LocalInstallModal from './components/LocalInstallModal';
 import LogsPage from './pages/LogsPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
-import { logAgentAction, downloadAgentPackage, installLocalhostAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -69,6 +69,31 @@ function App() {
     };
     initializeData();
   }, [loadData]);
+
+  // Check backend server status on mount
+  useEffect(() => {
+    const checkBackendStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/health');
+        if (response.ok) {
+          const data = await response.json();
+          toast.success('✅ Backend Server Running', {
+            description: `Version: ${data.version} | Platform: ${data.platform} | Latest code deployed`,
+            duration: 5000,
+          });
+        }
+      } catch {
+        toast.error('❌ Backend Server Not Responding', {
+          description: 'Please ensure the backend server is running on port 3001',
+          duration: 5000,
+        });
+      }
+    };
+    
+    // Delay slightly to ensure UI is ready
+    const timer = setTimeout(checkBackendStatus, 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Auto-refresh data every 5 minutes
   useEffect(() => {
@@ -168,47 +193,49 @@ function App() {
 
   // Action handlers
   const handleInstall = async (host) => {
-    // Check if localhost - open local install modal
-    if (host.hostname.toLowerCase() === 'localhost') {
-      setSelectedHost(host);
-      setLocalInstallModalOpen(true);
-      return;
-    }
-    
-    // Open version selector modal for remote hosts
+    // Open SSH install modal for all hosts
     setSelectedHost(host);
     setActionType('install');
-    setVersionSelectorOpen(true);
+    setLocalInstallModalOpen(true);
   };
 
   const handleLocalInstall = async (installData) => {
-    const toastId = toast.loading('Installing Zabbix Agent on localhost...');
+    const action = actionType || 'install';
+    const actionVerb = action === 'install' ? 'Installing' : 'Updating';
+    const actionPastTense = action === 'install' ? 'installed' : 'updated';
+    
+    const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via SSH...`);
     
     try {
-      await installLocalhostAgent(installData);
+      await installRemoteAgent(installData);
       
-      toast.success('Zabbix Agent installed successfully on localhost!', { id: toastId });
+      toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
       
-      // Reload data to reflect the installation
+      // Reload data to reflect the installation/update
       setTimeout(() => {
         loadData();
       }, 2000);
       
     } catch (error) {
-      toast.error(`Installation failed: ${error.message}`, { id: toastId });
+      toast.error(`${action === 'install' ? 'Installation' : 'Update'} failed: ${error.message}`, { id: toastId });
       throw error;
     }
   };
 
   const handleUpdate = async (host) => {
-    // Open version selector modal
+    // Open SSH install modal for update (reuse same modal)
     setSelectedHost(host);
     setActionType('update');
-    setVersionSelectorOpen(true);
+    setLocalInstallModalOpen(true);
   };
 
-  const handleVersionSelected = async (selectedVersion) => {
+  const handleVersionSelected = async (selectedVersionOrData) => {
     if (!selectedHost) return;
+    
+    // Extract version - handle both string and object formats
+    const selectedVersion = typeof selectedVersionOrData === 'string' 
+      ? selectedVersionOrData 
+      : selectedVersionOrData?.version;
     
     if (!selectedVersion) {
       toast.error('Please select a version');
@@ -368,13 +395,15 @@ function App() {
         )}
       </main>
 
-      {/* Local Install Modal */}
+      {/* SSH Install/Update Modal */}
       <LocalInstallModal
         isOpen={localInstallModalOpen}
         onClose={() => setLocalInstallModalOpen(false)}
         onInstall={handleLocalInstall}
         availableVersions={availableVersions}
         latestVersion={latestVersion}
+        selectedHost={selectedHost}
+        action={actionType}
       />
     </div>
   );
