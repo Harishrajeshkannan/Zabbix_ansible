@@ -14,6 +14,9 @@ const resolvePreferredSSHHost = (host) => {
 
 const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, latestVersion, selectedHost, selectedHosts = [], action = 'install' }) => {
   const isBatchMode = selectedHosts.length > 1;
+  const isUpdateAction = action === 'update';
+  const isInstallUpdateAction = action === 'install-update';
+  const actionTitle = isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install');
 
   const [formData, setFormData] = useState({
     host: resolvePreferredSSHHost(selectedHost),
@@ -76,7 +79,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{action === 'update' ? 'Update' : 'Install'} Zabbix Agent via SSH</h2>
+          <h2>{actionTitle} Zabbix Agent via SSH</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         
@@ -88,7 +91,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
                 Batch mode enabled: {selectedHosts.length} hosts selected. Remote host and agent hostname are auto-filled per host.
               </div>
             )}
-            {action === 'update' && selectedHost?.agentVersion && (
+            {isUpdateAction && selectedHost?.agentVersion && (
               <div className="update-info" style={{ marginBottom: '15px', padding: '10px', background: '#e3f2fd', borderRadius: '4px' }}>
                 <strong>Current Version:</strong> {selectedHost.agentVersion}
               </div>
@@ -253,14 +256,14 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           )}
 
           <div className="form-info">
-            <strong>{action === 'update' ? 'Update' : 'Installation'} Process:</strong>
+            <strong>{isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Installation')} Process:</strong>
             <ul>
               <li>Connect to remote server via SSH</li>
               <li>Download Zabbix Agent RPM package</li>
-              <li>{action === 'update' ? 'Update' : 'Install'} zabbix-agent2 via DNF</li>
+              <li>{isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} zabbix-agent2 via DNF</li>
               <li>Configure agent with server details</li>
               <li>Enable and start zabbix-agent2 service</li>
-              <li>Retrieve {action === 'update' ? 'update' : 'installation'} logs</li>
+              <li>Retrieve {isInstallUpdateAction ? 'operation' : (isUpdateAction ? 'update' : 'installation')} logs</li>
             </ul>
             <div style={{ marginTop: '10px', padding: '10px', background: '#fff3cd', borderRadius: '4px', fontSize: '0.9em' }}>
               <strong>⚠️ Requirements:</strong>
@@ -279,10 +282,10 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
             </button>
             <button type="submit" className="btn-install" disabled={installing}>
               {installing 
-                ? (action === 'update' ? 'Updating...' : 'Installing...') 
+                ? (isInstallUpdateAction ? 'Processing...' : (isUpdateAction ? 'Updating...' : 'Installing...')) 
                 : (isBatchMode
-                  ? `${action === 'update' ? 'Update' : 'Install'} Selected Hosts (${selectedHosts.length})`
-                  : (action === 'update' ? 'Update Agent' : 'Install Agent'))}
+                  ? `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Selected Hosts (${selectedHosts.length})`
+                  : `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Agent`)}
             </button>
           </div>
         </form>

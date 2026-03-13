@@ -237,19 +237,17 @@ function App() {
     });
   };
 
-  const handleBatchAction = (action) => {
-    const targets = selectedHosts.filter((host) =>
-      action === 'install' ? host.status === 'No Agent' : host.status === 'Outdated'
-    );
+  const handleBatchAction = () => {
+    const targets = selectedHosts.filter((host) => canHostBeActioned(host));
 
     if (targets.length < 1) {
-      toast.error(`No eligible hosts selected for ${action}.`);
+      toast.error('No eligible hosts selected for install/update.');
       return;
     }
 
     setBatchHosts(targets);
     setSelectedHost(targets[0]);
-    setActionType(action);
+    setActionType('install-update');
     setLocalInstallModalOpen(true);
   };
 
@@ -268,8 +266,13 @@ function App() {
 
   const handleLocalInstall = async (installData) => {
     const action = actionType || 'install';
-    const actionVerb = action === 'install' ? 'Installing' : 'Updating';
-    const actionPastTense = action === 'install' ? 'installed' : 'updated';
+    const isMixedAction = action === 'install-update';
+    const actionVerb = isMixedAction
+      ? 'Installing/Updating'
+      : (action === 'install' ? 'Installing' : 'Updating');
+    const actionPastTense = isMixedAction
+      ? 'installed/updated'
+      : (action === 'install' ? 'installed' : 'updated');
 
     const isBatch = batchHosts.length > 1;
     const targets = isBatch ? batchHosts : [selectedHost].filter(Boolean);
@@ -300,8 +303,11 @@ function App() {
 
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
+      const perHostVerb = isMixedAction
+        ? (target.status === 'No Agent' ? 'Installing' : 'Updating')
+        : actionVerb;
 
-      toast.loading(`${actionVerb} on ${i + 1}/${targets.length}: ${target.hostname}`, { id: toastId });
+      toast.loading(`${perHostVerb} on ${i + 1}/${targets.length}: ${target.hostname}`, { id: toastId });
 
       const payload = {
         host: resolvePreferredSSHHost(target),
@@ -513,18 +519,10 @@ function App() {
                   <button
                     type="button"
                     className="batch-btn batch-install"
-                    onClick={() => handleBatchAction('install')}
-                    disabled={selectedInstallCount === 0}
+                    onClick={handleBatchAction}
+                    disabled={selectedInstallCount + selectedUpdateCount === 0}
                   >
-                    Install Selected ({selectedInstallCount})
-                  </button>
-                  <button
-                    type="button"
-                    className="batch-btn batch-update"
-                    onClick={() => handleBatchAction('update')}
-                    disabled={selectedUpdateCount === 0}
-                  >
-                    Update Selected ({selectedUpdateCount})
+                    Install/Update Selected ({selectedInstallCount} install, {selectedUpdateCount} update)
                   </button>
                 </div>
               </div>
