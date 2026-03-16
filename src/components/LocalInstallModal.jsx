@@ -26,6 +26,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     version: latestVersion,
     serverIP: '',
     serverPort: '10051',
+    listenerPort: '10050',
     hostname: selectedHost?.hostname || '',
     usePSK: false,
     psk: '',
@@ -206,6 +207,20 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               id="serverPort"
               name="serverPort"
               value={formData.serverPort}
+              onChange={handleChange}
+              min="1"
+              max="65535"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="listenerPort">Listener Port</label>
+            <input
+              type="number"
+              id="listenerPort"
+              name="listenerPort"
+              value={formData.listenerPort}
               onChange={handleChange}
               min="1"
               max="65535"

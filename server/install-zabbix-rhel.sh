@@ -1,13 +1,13 @@
 #!/bin/sh
 # Zabbix Agent 2 Installation Script for RHEL/CentOS/Rocky/AlmaLinux
 # This script must be run with sudo/root privileges
-# Usage: sudo ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]
+# Usage: sudo ./install-zabbix-rhel.sh [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [LISTEN_PORT]
 #
 # Examples:
 #   sudo ./install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver.example.com
 #   sudo ./install-zabbix-rhel.sh 6.4.18 zabbix.company.com myserver 10051
 #
-# Version, Server IP, and Hostname are required. Server Port defaults to 10051.
+# Version, Server IP, and Hostname are required. Server Port defaults to 10051 and Listen Port defaults to 10050.
 
 set -eu
 
@@ -337,6 +337,7 @@ configure_zabbix_agent() {
     local server_ip="$1"
     local server_port="$2"
     local hostname="$3"
+    local listen_port="$4"
     
     print_section "Configuring Zabbix Agent 2"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting configuration..."
@@ -358,8 +359,9 @@ configure_zabbix_agent() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ServerActive=$server_ip:$server_port"
     sudo sed -i "s/^Hostname=.*/Hostname=$hostname/" /etc/zabbix/zabbix_agent2.conf
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set Hostname=$hostname"
-    sudo sed -i "s/^# ListenPort=.*/ListenPort=$DEFAULT_LISTEN_PORT/" /etc/zabbix/zabbix_agent2.conf
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ListenPort=$DEFAULT_LISTEN_PORT"
+    sudo sed -i "s/^# ListenPort=.*/ListenPort=$listen_port/" /etc/zabbix/zabbix_agent2.conf
+    sudo sed -i "s/^ListenPort=.*/ListenPort=$listen_port/" /etc/zabbix/zabbix_agent2.conf
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Set ListenPort=$listen_port"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Minimal configuration applied"
     
     print_info "Using unencrypted connection (no PSK)"
@@ -434,8 +436,8 @@ start_zabbix_service() {
 configure_firewall() {
     print_section "Firewall Configuration"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Skipping firewall configuration..."
-    print_info "Firewall port configuration skipped (port $DEFAULT_LISTEN_PORT/tcp)"
-    print_info "Note: Zabbix server must be able to reach this agent on port $DEFAULT_LISTEN_PORT"
+    print_info "Firewall port configuration skipped (port ${LISTEN_PORT:-$DEFAULT_LISTEN_PORT}/tcp)"
+    print_info "Note: Zabbix server must be able to reach this agent on port ${LISTEN_PORT:-$DEFAULT_LISTEN_PORT}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Firewall configuration skipped as per configuration"
 }
 
@@ -445,6 +447,7 @@ show_summary() {
     local server_ip="$2"
     local server_port="$3"
     local hostname="$4"
+    local listen_port="$5"
     
     print_section "Installation Summary"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Generating installation summary..."
@@ -455,7 +458,7 @@ show_summary() {
     echo "Configuration Details:"
     echo "  • Hostname: $hostname"
     echo "  • Zabbix Server: $server_ip:$server_port"
-    echo "  • Listen Port: $DEFAULT_LISTEN_PORT"
+    echo "  • Listen Port: $listen_port"
     echo "  • Encryption: None (plaintext)"
     echo "  • Service: zabbix-agent2 (enabled and running)"
     echo ""
@@ -504,6 +507,7 @@ main() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 2 (SERVER_IP): '${2:-<not provided>}'"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 3 (HOSTNAME): '${3:-<not provided>}'"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 4 (SERVER_PORT): '${4:-<not provided>}'"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Argument 5 (LISTEN_PORT): '${5:-<not provided>}'"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: All arguments: ${@:-<none>}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: Script called as: $0"
     echo ""
@@ -512,7 +516,7 @@ main() {
     if [ $# -lt 2 ]; then
         print_error "Insufficient arguments for automated installation"
         echo "Received $# arguments: ${@:-<none>}"
-        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
+        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [LISTEN_PORT]"
         echo ""
         echo "Examples:"
         echo "  sudo $0 7.0.5 192.168.1.100 myserver.example.com"
@@ -525,10 +529,23 @@ main() {
     SERVER_IP="${2:-}"
     HOSTNAME="${3:-$(hostname -f 2>/dev/null || hostname)}"
     SERVER_PORT="${4:-$DEFAULT_SERVER_PORT}"
+    LISTEN_PORT="${5:-$DEFAULT_LISTEN_PORT}"
     
     if [ -z "$SERVER_IP" ]; then
         print_error "Server IP is required"
-        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
+        echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [LISTEN_PORT]"
+        exit 1
+    fi
+
+    case "$LISTEN_PORT" in
+        ''|*[!0-9]*)
+            print_error "Invalid listen port: $LISTEN_PORT"
+            exit 1
+            ;;
+    esac
+
+    if [ "$LISTEN_PORT" -lt 1 ] || [ "$LISTEN_PORT" -gt 65535 ]; then
+        print_error "Listen port must be between 1 and 65535: $LISTEN_PORT"
         exit 1
     fi
     
@@ -542,6 +559,7 @@ main() {
     print_section "Installation Configuration"
     echo "Version: $VERSION"
     echo "Server: $SERVER_IP:$SERVER_PORT"
+    echo "Listen Port: $LISTEN_PORT"
     echo "Hostname: $HOSTNAME"
     echo "Encryption: Disabled (plaintext)"
     echo "Log File: $LOG_FILE"
@@ -555,7 +573,7 @@ main() {
     install_prerequisites
     add_zabbix_repo "$VERSION"
     install_zabbix_agent "$VERSION"
-    configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
+    configure_zabbix_agent "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME" "$LISTEN_PORT"
     validate_configuration
     start_zabbix_service
     configure_firewall
@@ -563,7 +581,7 @@ main() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== INSTALLATION COMPLETED =========="
     
     # Show summary
-    show_summary "$VERSION" "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME"
+    show_summary "$VERSION" "$SERVER_IP" "$SERVER_PORT" "$HOSTNAME" "$LISTEN_PORT"
     
     # Show log file location
     echo ""
@@ -577,7 +595,7 @@ trap 'print_error "Script interrupted"; exit 1' INT TERM
 # Check if running with elevated privileges
 if [ "$EUID" -ne 0 ]; then
     print_error "This script must be run with sudo or as root"
-    echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT]"
+    echo "Usage: sudo $0 [VERSION] [SERVER_IP] [HOSTNAME] [SERVER_PORT] [LISTEN_PORT]"
     exit 1
 fi
 

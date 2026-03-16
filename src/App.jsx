@@ -317,6 +317,7 @@ function App() {
         version: installData.version,
         serverIP: installData.serverIP,
         serverPort: installData.serverPort,
+        listenerPort: installData.listenerPort,
         hostname: target.hostname
       };
 

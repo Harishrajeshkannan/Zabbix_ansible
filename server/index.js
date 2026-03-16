@@ -538,6 +538,7 @@ app.post('/api/install-remote', async (req, res) => {
       version,        // Zabbix version
       serverIP,       // Zabbix server IP
       serverPort = 10051,  // Zabbix server port
+      listenerPort = 10050, // Zabbix agent listen port
       hostname        // Agent hostname
     } = req.body;
     
@@ -546,6 +547,7 @@ app.post('/api/install-remote', async (req, res) => {
     console.log(`  SSH User: ${sshUser}`);
     console.log(`  Zabbix Version: ${version}`);
     console.log(`  Zabbix Server: ${serverIP}:${serverPort}`);
+    console.log(`  Agent Listen Port: ${listenerPort}`);
     console.log(`  Agent Hostname: ${hostname}\n`);
     
     // Validate required fields
@@ -582,6 +584,13 @@ app.post('/api/install-remote', async (req, res) => {
       return res.status(400).json({
         error: 'Invalid port',
         details: 'Port must be between 1 and 65535'
+      });
+    }
+
+    if (listenerPort < 1 || listenerPort > 65535) {
+      return res.status(400).json({
+        error: 'Invalid listener port',
+        details: 'Listener port must be between 1 and 65535'
       });
     }
     
@@ -638,9 +647,9 @@ app.post('/api/install-remote', async (req, res) => {
     // Use echo with -S flag to pass password to sudo via stdin
     // Use absolute paths for deterministic sudoers command matching.
     const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
-    const installCommand = `echo '${escapedPassword}' | sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
+    const installCommand = `echo '${escapedPassword}' | sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}`;
     console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
+    console.log(`[SSH-INSTALL] sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}\n`);
     
     let result;
     try {
