@@ -636,11 +636,11 @@ app.post('/api/install-remote', async (req, res) => {
     
     // Execute installation on remote server with sudo password
     // Use echo with -S flag to pass password to sudo via stdin
-    // Use 'sh' for POSIX compatibility (works with restricted sudoers)
+    // Use absolute paths for deterministic sudoers command matching.
     const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
-    const installCommand = `echo '${escapedPassword}' | sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
+    const installCommand = `echo '${escapedPassword}' | sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}`;
     console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo -S sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
+    console.log(`[SSH-INSTALL] sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort}\n`);
     
     let result;
     try {
@@ -685,7 +685,7 @@ app.post('/api/install-remote', async (req, res) => {
     
     // Cleanup remote script
     try {
-      const cleanupCommand = `echo '${escapedPassword}' | sudo -S rm -f ${remoteScriptPath}`;
+      const cleanupCommand = `echo '${escapedPassword}' | sudo -S /bin/rm -f ${remoteScriptPath}`;
       await executeSSHCommand(connection, cleanupCommand);
       console.log(`[SSH-INSTALL] ✓ Remote cleanup completed`);
     } catch (cleanErr) {
