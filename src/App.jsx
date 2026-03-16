@@ -16,7 +16,7 @@ import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
 function App() {
-  const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated';
+  const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated' || host.status === 'Up to Date';
   const resolvePreferredSSHHost = (host) => {
     const ip = (host?.ip || '').trim();
     return ip && ip.toUpperCase() !== 'N/A' ? ip : (host?.hostname || '');
@@ -190,7 +190,7 @@ function App() {
     visibleActionableHosts.every((host) => selectedHostIds.includes(host.id));
 
   const selectedInstallCount = selectedHosts.filter((host) => host.status === 'No Agent').length;
-  const selectedUpdateCount = selectedHosts.filter((host) => host.status === 'Outdated').length;
+  const selectedUpdateCount = selectedHosts.filter((host) => host.status === 'Outdated' || host.status === 'Up to Date').length;
 
   const handlePageChange = (page) => {
     setCurrentPage(page);

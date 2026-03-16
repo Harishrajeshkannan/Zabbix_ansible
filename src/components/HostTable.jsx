@@ -10,7 +10,7 @@ const HostTable = ({
   onToggleSelectAllVisible,
   allVisibleSelected = false
 }) => {
-  const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated';
+  const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated' || host.status === 'Up to Date';
 
   const getStatusClass = (status) => {
     switch (status) {
@@ -38,6 +38,15 @@ const HostTable = ({
     } else if (host.status === 'Outdated') {
       return (
         <button 
+          className="action-btn action-update"
+          onClick={() => onUpdate(host)}
+        >
+          Update
+        </button>
+      );
+    } else if (host.status === 'Up to Date') {
+      return (
+        <button
           className="action-btn action-update"
           onClick={() => onUpdate(host)}
         >
