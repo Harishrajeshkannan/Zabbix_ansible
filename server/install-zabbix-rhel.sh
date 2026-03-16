@@ -183,6 +183,10 @@ install_prerequisites() {
 # Function to add Zabbix repository
 add_zabbix_repo() {
     local version="$1"
+    local repo_base
+    local release_number
+    local agent_filename
+    local exact_package_name
     
     print_section "Downloading Zabbix Agent Package"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Preparing to download Zabbix Agent 2 version $version..."
@@ -190,9 +194,21 @@ add_zabbix_repo() {
     # Extract major.minor version (e.g., 7.4 from 7.4.7)
     MAJOR_VERSION=$(echo "$version" | cut -d. -f1-2)
     
-    # Build agent package URL
-    # Format: https://repo.zabbix.com/zabbix/7.4/stable/rhel/8/x86_64/zabbix-agent2-7.4.7-release1.el8.x86_64.rpm
-    AGENT_URL="https://repo.zabbix.com/zabbix/$MAJOR_VERSION/stable/rhel/$RHEL_VERSION/x86_64/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
+    # Build repository base URL and resolve the newest release for requested version.
+    # This avoids hardcoding release1 when only release2+ exists in the repo.
+    repo_base="https://repo.zabbix.com/zabbix/$MAJOR_VERSION/stable/rhel/$RHEL_VERSION/x86_64"
+    release_number=$(curl -k -s "$repo_base/" | grep -o "zabbix-agent2-$version-release[0-9][0-9]*\\.el$RHEL_VERSION\\.x86_64\\.rpm" | sed -n "s/.*-release\([0-9][0-9]*\)\\.el$RHEL_VERSION\\.x86_64\\.rpm/\1/p" | sort -n | tail -1)
+
+    if [ -z "$release_number" ]; then
+        print_error "Could not find Zabbix Agent package for version $version on RHEL $RHEL_VERSION"
+        print_error "Checked repository: $repo_base"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package lookup FAILED for version=$version rhel=$RHEL_VERSION"
+        exit 1
+    fi
+
+    agent_filename="zabbix-agent2-$version-release$release_number.el$RHEL_VERSION.x86_64.rpm"
+    exact_package_name="zabbix-agent2-$version-release$release_number.el$RHEL_VERSION"
+    AGENT_URL="$repo_base/$agent_filename"
     
     print_info "Agent package URL: $AGENT_URL"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Download URL: $AGENT_URL"
@@ -209,8 +225,8 @@ add_zabbix_repo() {
     sudo chmod 777 "$PERSISTENT_RPM_DIR"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Persistent RPM directory: $PERSISTENT_RPM_DIR (777 permissions)"
 
-    AGENT_RPM="$TEMP_DIR/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
-    PERSISTENT_AGENT_RPM="$PERSISTENT_RPM_DIR/zabbix-agent2-$version-release1.el$RHEL_VERSION.x86_64.rpm"
+    AGENT_RPM="$TEMP_DIR/$agent_filename"
+    PERSISTENT_AGENT_RPM="$PERSISTENT_RPM_DIR/$agent_filename"
     
     print_info "Downloading agent package..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Downloading to: $AGENT_RPM"
@@ -233,8 +249,8 @@ add_zabbix_repo() {
             print_info "Zabbix Agent 2 is already installed: $INSTALLED_VERSION"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installed version: $INSTALLED_VERSION"
             
-            # Check if it's the exact version requested
-            if rpm -q "zabbix-agent2-$version-release1.el$RHEL_VERSION" >/dev/null 2>&1; then
+            # Check if it's the exact package release requested
+            if rpm -q "$exact_package_name" >/dev/null 2>&1; then
                 print_info "Requested version $version is already installed, skipping installation"
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Package version matches, skipping installation"
                 sudo rm -rf "$TEMP_DIR"
@@ -255,6 +271,14 @@ add_zabbix_repo() {
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] RPM flags: $RPM_FLAGS"
         
         if rpm -Uvh $RPM_FLAGS "$AGENT_RPM" >> "$LOG_FILE" 2>&1; then
+            INSTALLED_VERSION_ONLY=$(rpm -q --qf '%{VERSION}' zabbix-agent2 2>/dev/null || echo "")
+            if [ "$INSTALLED_VERSION_ONLY" != "$version" ]; then
+                print_error "Version verification failed: requested $version, installed $INSTALLED_VERSION_ONLY"
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Version verification FAILED"
+                sudo rm -rf "$TEMP_DIR"
+                exit 1
+            fi
+
             print_success "Zabbix Agent 2 installed successfully"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installation completed"
             sudo rm -rf "$TEMP_DIR"
