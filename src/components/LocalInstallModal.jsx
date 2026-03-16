@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './LocalInstallModal.css';
 
 const resolvePreferredSSHHost = (host) => {
@@ -32,10 +32,20 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     pskIdentity: ''
   });
   const [installing, setInstalling] = useState(false);
+  const lastInitKeyRef = useRef('');
 
-  // Update form when selectedHost changes
+  // Initialize form only when modal target/action changes. This prevents
+  // accidental reset of a manually selected version while the modal is open.
   useEffect(() => {
-    if (selectedHost) {
+    if (!selectedHost) return;
+
+    const initKey = `${selectedHost.id || selectedHost.hostname || ''}:${action}:${isBatchMode ? 'batch' : 'single'}`;
+    if (lastInitKeyRef.current === initKey) {
+      return;
+    }
+
+    lastInitKeyRef.current = initKey;
+
       setFormData(prev => ({
         ...prev,
         host: resolvePreferredSSHHost(selectedHost),
@@ -45,8 +55,13 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           ? selectedHost.agentVersion 
           : latestVersion
       }));
+  }, [selectedHost, action, isBatchMode, latestVersion]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      lastInitKeyRef.current = '';
     }
-  }, [selectedHost, action, latestVersion]);
+  }, [isOpen]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
