@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
+import crypto from 'crypto';
 import { Client as SSHClient } from 'ssh2';
 
 const execAsync = promisify(exec);
@@ -127,6 +128,22 @@ async function uploadFileSSH(conn, localPath, remotePath) {
 }
 
 /**
+ * Upload in-memory content to remote server via SFTP
+ */
+async function uploadBufferSSH(conn, content, remotePath) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+
+      const stream = sftp.createWriteStream(remotePath, { mode: 0o600 });
+      stream.on('error', reject);
+      stream.on('finish', resolve);
+      stream.end(content, 'utf8');
+    });
+  });
+}
+
+/**
  * Download file from remote server via SFTP
  */
 async function downloadFileSSH(conn, remotePath, localPath) {
@@ -148,13 +165,54 @@ async function downloadFileSSH(conn, remotePath, localPath) {
 async function connectSSH(config) {
   return new Promise((resolve, reject) => {
     const conn = new SSHClient();
+    const connectConfig = {
+      host: config.host,
+      port: config.port,
+      username: config.username,
+      readyTimeout: 15000
+    };
+
+    if (typeof config.password === 'string' && config.password.length > 0) {
+      connectConfig.password = config.password;
+    }
     
     conn.on('ready', () => {
       resolve(conn);
     }).on('error', (err) => {
       reject(err);
-    }).connect(config);
+    }).connect(connectConfig);
   });
+}
+
+/**
+ * Quote string for shell single-quoted context
+ */
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Normalize a user-supplied path to remain inside allowed root.
+ */
+function normalizeRemotePath(relativePath, allowedRoot) {
+  const safeRoot = path.posix.normalize(allowedRoot).replace(/\/$/, '');
+  const incoming = String(relativePath || '').trim();
+  const normalizedRelative = path.posix.normalize(`/${incoming}`).replace(/^\//, '');
+
+  if (normalizedRelative.includes('..')) {
+    throw new Error('Path traversal is not allowed');
+  }
+
+  const absolutePath = path.posix.join(safeRoot, normalizedRelative);
+  if (!absolutePath.startsWith(`${safeRoot}/`) && absolutePath !== safeRoot) {
+    throw new Error('Path outside allowed directory');
+  }
+
+  return {
+    root: safeRoot,
+    relative: normalizedRelative,
+    absolute: absolutePath
+  };
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -816,6 +874,350 @@ app.post('/api/cleanup-temp', async (req, res) => {
       error: 'Cleanup failed',
       details: error.message
     });
+  }
+});
+
+/**
+ * Remote file manager - list files and folders under /etc/zabbix
+ */
+app.post('/api/remote-files/list', async (req, res) => {
+  let connection = null;
+
+  try {
+    const {
+      host,
+      sshPort = 22,
+      sshUser,
+      sshPassword = '',
+      relativePath = ''
+    } = req.body;
+
+    if (!host || !sshUser) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'host and sshUser are required'
+      });
+    }
+
+    const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
+    const safePath = shellQuote(pathInfo.absolute);
+
+    connection = await connectSSH({
+      host,
+      port: sshPort,
+      username: sshUser,
+      password: sshPassword
+    });
+
+    const listCommand = `sudo -n ls -la ${safePath} 2>/dev/null`;
+    const result = await executeSSHCommand(connection, listCommand);
+
+    if (!result.success) {
+      return res.status(404).json({
+        error: 'Directory not found or no access',
+        details: result.stderr || result.stdout || 'Unable to list directory'
+      });
+    }
+
+    const lines = result.stdout.split('\n').slice(1).filter((line) => line.trim());
+    const items = [];
+
+    lines.forEach((line) => {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 9) return;
+
+      const permissions = parts[0];
+      const size = Number(parts[4]) || 0;
+      const modified = `${parts[5]} ${parts[6]} ${parts[7]}`;
+      const name = parts.slice(8).join(' ');
+
+      if (name === '.' || name === '..') return;
+
+      const childRelative = pathInfo.relative ? `${pathInfo.relative}/${name}` : name;
+      items.push({
+        name,
+        type: permissions.startsWith('d') ? 'directory' : 'file',
+        size,
+        modified,
+        permissions,
+        relativePath: childRelative
+      });
+    });
+
+    const sortedItems = items.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return res.json({
+      success: true,
+      root: pathInfo.root,
+      currentPath: pathInfo.relative,
+      items: sortedItems
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to list remote files',
+      details: error.message
+    });
+  } finally {
+    if (connection) connection.end();
+  }
+});
+
+/**
+ * Remote file manager - read a text file under /etc/zabbix
+ */
+app.post('/api/remote-files/read', async (req, res) => {
+  let connection = null;
+
+  try {
+    const {
+      host,
+      sshPort = 22,
+      sshUser,
+      sshPassword = '',
+      relativePath
+    } = req.body;
+
+    if (!host || !sshUser || !relativePath) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'host, sshUser, and relativePath are required'
+      });
+    }
+
+    const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
+    const safePath = shellQuote(pathInfo.absolute);
+
+    connection = await connectSSH({
+      host,
+      port: sshPort,
+      username: sshUser,
+      password: sshPassword
+    });
+
+    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath} 2>/dev/null`);
+    if (!statResult.success || !statResult.stdout.trim()) {
+      return res.status(404).json({
+        error: 'File not found',
+        details: 'Cannot stat target file'
+      });
+    }
+
+    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
+    const size = Number(sizeStr) || 0;
+
+    if (size > 1024 * 1024) {
+      return res.status(413).json({
+        error: 'File too large',
+        details: 'Only files up to 1 MB are supported in the editor'
+      });
+    }
+
+    const readResult = await executeSSHCommand(connection, `sudo -n cat ${safePath}`);
+    if (!readResult.success) {
+      return res.status(500).json({
+        error: 'Failed to read file',
+        details: readResult.stderr || 'Cannot read file content'
+      });
+    }
+
+    const content = readResult.stdout;
+    const hash = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+
+    return res.json({
+      success: true,
+      relativePath: pathInfo.relative,
+      content,
+      metadata: {
+        size,
+        mtime: Number(mtimeStr) || 0,
+        mode,
+        hash
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to read remote file',
+      details: error.message
+    });
+  } finally {
+    if (connection) connection.end();
+  }
+});
+
+/**
+ * Remote file manager - save file content under /etc/zabbix
+ */
+app.post('/api/remote-files/write', async (req, res) => {
+  let connection = null;
+
+  try {
+    const {
+      host,
+      sshPort = 22,
+      sshUser,
+      sshPassword = '',
+      relativePath,
+      content,
+      previousMtime
+    } = req.body;
+
+    if (!host || !sshUser || !relativePath || typeof content !== 'string') {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'host, sshUser, relativePath, and content are required'
+      });
+    }
+
+    const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
+    const safePath = shellQuote(pathInfo.absolute);
+    const tempPath = `/tmp/zabbix-portal-edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
+    const safeTempPath = shellQuote(tempPath);
+
+    connection = await connectSSH({
+      host,
+      port: sshPort,
+      username: sshUser,
+      password: sshPassword
+    });
+
+    if (Number.isFinite(Number(previousMtime))) {
+      const mtimeResult = await executeSSHCommand(connection, `sudo -n stat -c "%Y" ${safePath} 2>/dev/null`);
+      const currentMtime = Number(mtimeResult.stdout.trim());
+      if (mtimeResult.success && currentMtime && currentMtime !== Number(previousMtime)) {
+        return res.status(409).json({
+          error: 'File changed on server',
+          details: 'The file was modified since you opened it. Reload before saving again.'
+        });
+      }
+    }
+
+    await uploadBufferSSH(connection, content, tempPath);
+
+    const installCmd = `sudo -n install -m 0644 ${safeTempPath} ${safePath}`;
+    const writeResult = await executeSSHCommand(connection, installCmd);
+    await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
+
+    if (!writeResult.success) {
+      return res.status(500).json({
+        error: 'Failed to save file',
+        details: writeResult.stderr || writeResult.stdout || 'Unable to write file'
+      });
+    }
+
+    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
+    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
+
+    console.log(`[REMOTE-FILES] Saved ${pathInfo.absolute} on ${host} by ${sshUser}`);
+
+    return res.json({
+      success: true,
+      relativePath: pathInfo.relative,
+      metadata: {
+        size: Number(sizeStr) || 0,
+        mtime: Number(mtimeStr) || 0,
+        mode
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to write remote file',
+      details: error.message
+    });
+  } finally {
+    if (connection) connection.end();
+  }
+});
+
+/**
+ * Remote file manager - create a new file under /etc/zabbix
+ */
+app.post('/api/remote-files/create', async (req, res) => {
+  let connection = null;
+
+  try {
+    const {
+      host,
+      sshPort = 22,
+      sshUser,
+      sshPassword = '',
+      directoryPath = '',
+      fileName,
+      content = ''
+    } = req.body;
+
+    if (!host || !sshUser || !fileName) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'host, sshUser, and fileName are required'
+      });
+    }
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(fileName)) {
+      return res.status(400).json({
+        error: 'Invalid file name',
+        details: 'Allowed characters: letters, numbers, dot, underscore, dash'
+      });
+    }
+
+    const targetRelative = directoryPath ? `${directoryPath}/${fileName}` : fileName;
+    const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
+    const safePath = shellQuote(pathInfo.absolute);
+    const tempPath = `/tmp/zabbix-portal-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
+    const safeTempPath = shellQuote(tempPath);
+
+    connection = await connectSSH({
+      host,
+      port: sshPort,
+      username: sshUser,
+      password: sshPassword
+    });
+
+    const existsResult = await executeSSHCommand(connection, `sudo -n test -e ${safePath} && echo exists || echo missing`);
+    if (existsResult.stdout.includes('exists')) {
+      return res.status(409).json({
+        error: 'File already exists',
+        details: `A file named ${fileName} already exists in this directory`
+      });
+    }
+
+    await uploadBufferSSH(connection, content, tempPath);
+    const installCmd = `sudo -n install -m 0644 ${safeTempPath} ${safePath}`;
+    const createResult = await executeSSHCommand(connection, installCmd);
+    await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
+
+    if (!createResult.success) {
+      return res.status(500).json({
+        error: 'Failed to create file',
+        details: createResult.stderr || createResult.stdout || 'Unable to create file'
+      });
+    }
+
+    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
+    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
+
+    console.log(`[REMOTE-FILES] Created ${pathInfo.absolute} on ${host} by ${sshUser}`);
+
+    return res.json({
+      success: true,
+      relativePath: pathInfo.relative,
+      metadata: {
+        size: Number(sizeStr) || 0,
+        mtime: Number(mtimeStr) || 0,
+        mode
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to create remote file',
+      details: error.message
+    });
+  } finally {
+    if (connection) connection.end();
   }
 });
 

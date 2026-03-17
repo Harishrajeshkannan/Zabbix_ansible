@@ -5,6 +5,7 @@ const HostTable = ({
   hosts,
   onInstall,
   onUpdate,
+  onManageFiles,
   selectedHostIds = [],
   onToggleHostSelection,
   onToggleSelectAllVisible,
@@ -26,38 +27,47 @@ const HostTable = ({
   };
 
   const getActionButton = (host) => {
-    if (host.status === 'No Agent') {
-      return (
-        <button 
-          className="action-btn action-install"
-          onClick={() => onInstall(host)}
-        >
-          Install
-        </button>
-      );
-    } else if (host.status === 'Outdated') {
-      return (
-        <button 
-          className="action-btn action-update"
-          onClick={() => onUpdate(host)}
-        >
-          Update
-        </button>
-      );
-    } else if (host.status === 'Up to Date') {
-      return (
-        <button
-          className="action-btn action-update"
-          onClick={() => onUpdate(host)}
-        >
-          Update
-        </button>
-      );
-    } else {
-      return (
-        <span className="action-none">No Action Required</span>
-      );
+    const primaryAction = (() => {
+      if (host.status === 'No Agent') {
+        return (
+          <button
+            className="action-btn action-install"
+            onClick={() => onInstall(host)}
+          >
+            Install
+          </button>
+        );
+      }
+
+      if (host.status === 'Outdated' || host.status === 'Up to Date') {
+        return (
+          <button
+            className="action-btn action-update"
+            onClick={() => onUpdate(host)}
+          >
+            Update
+          </button>
+        );
+      }
+
+      return <span className="action-none">No Action Required</span>;
+    })();
+
+    if (!onManageFiles) {
+      return primaryAction;
     }
+
+    return (
+      <div className="action-group">
+        {primaryAction}
+        <button
+          className="action-btn action-files"
+          onClick={() => onManageFiles(host)}
+        >
+          Files
+        </button>
+      </div>
+    );
   };
 
   const getSelectionCheckbox = (host) => {

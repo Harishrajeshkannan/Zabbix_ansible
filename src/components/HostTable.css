@@ -165,6 +165,12 @@
   text-align: center;
 }
 
+.action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .action-btn {
   padding: 0.5rem 1.125rem;
   border: none;
@@ -218,6 +224,17 @@
   background-color: #d97706;
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(245, 158, 11, 0.3);
+}
+
+.action-files {
+  background-color: #0f766e;
+  color: white;
+}
+
+.action-files:hover {
+  background-color: #0d5f59;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(15, 118, 110, 0.3);
 }
 
 .action-none {

@@ -87,7 +87,7 @@
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 1;
-  min-width: 120px;
+  min-width: 110px;
   justify-content: center;
 }
 
@@ -103,7 +103,7 @@
   position: absolute;
   top: 0.25rem;
   left: 0.25rem;
-  width: calc(50% - 0.25rem);
+  width: calc((100% - 0.5rem) / 3);
   height: calc(100% - 0.5rem);
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.4) 0%, rgba(37, 99, 235, 0.3) 100%);
   border: 1.5px solid rgba(255, 255, 255, 0.5);
@@ -114,8 +114,16 @@
   backdrop-filter: blur(5px);
 }
 
-.nav-toggle-slider.slide-right {
+.nav-toggle-slider.slide-0 {
+  transform: translateX(0);
+}
+
+.nav-toggle-slider.slide-1 {
   transform: translateX(100%);
+}
+
+.nav-toggle-slider.slide-2 {
+  transform: translateX(200%);
 }
 
 .nav-toggle-btn.active {

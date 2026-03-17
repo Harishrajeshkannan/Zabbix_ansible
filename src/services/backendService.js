@@ -1,5 +1,19 @@
 const BACKEND_API_URL = import.meta.env.VITE_BACKEND_API_URL || '/api';
 
+const parseApiResponse = async (response) => {
+  const raw = await response.text();
+
+  if (!raw || !raw.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { rawResponse: raw };
+  }
+};
+
 /**
  * Log agent action to file via backend
  * @param {string} action - 'install' or 'update'
@@ -155,4 +169,122 @@ export const installRemoteAgent = async (installData) => {
   }
 };
 
-export default { logAgentAction, getLogFiles, fetchAgentVersions, downloadAgentPackage, installRemoteAgent };
+/**
+ * List directory entries under /etc/zabbix on remote server
+ * @param {Object} payload - SSH context and relative path
+ */
+export const listRemoteFiles = async (payload) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/remote-files/list`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to list remote files:', error);
+    throw error;
+  }
+};
+
+/**
+ * Read file contents from /etc/zabbix on remote server
+ * @param {Object} payload - SSH context and target file path
+ */
+export const readRemoteFile = async (payload) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/remote-files/read`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to read remote file:', error);
+    throw error;
+  }
+};
+
+/**
+ * Save file contents to /etc/zabbix on remote server
+ * @param {Object} payload - SSH context and content
+ */
+export const writeRemoteFile = async (payload) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/remote-files/write`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to save remote file:', error);
+    throw error;
+  }
+};
+
+/**
+ * Create a new file under /etc/zabbix on remote server
+ * @param {Object} payload - SSH context, target directory, file name and content
+ */
+export const createRemoteFile = async (payload) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/remote-files/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to create remote file:', error);
+    throw error;
+  }
+};
+
+export default {
+  logAgentAction,
+  getLogFiles,
+  fetchAgentVersions,
+  downloadAgentPackage,
+  installRemoteAgent,
+  listRemoteFiles,
+  readRemoteFile,
+  writeRemoteFile,
+  createRemoteFile
+};

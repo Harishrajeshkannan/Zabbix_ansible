@@ -10,6 +10,7 @@ import ErrorMessage from './components/ErrorMessage';
 import VersionSelector from './components/VersionSelector';
 import LocalInstallModal from './components/LocalInstallModal';
 import LogsPage from './pages/LogsPage';
+import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
 import { logAgentAction, downloadAgentPackage, installRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
@@ -48,6 +49,7 @@ function App() {
   const [actionType, setActionType] = useState('');
   const [selectedHostIds, setSelectedHostIds] = useState([]);
   const [batchHosts, setBatchHosts] = useState([]);
+  const [preferredFileHost, setPreferredFileHost] = useState(null);
 
   // Load data from Zabbix API
   const loadData = useCallback(async () => {
@@ -436,6 +438,11 @@ function App() {
     loadData();
   };
 
+  const handleManageFiles = (host) => {
+    setPreferredFileHost(host);
+    setCurrentView('files');
+  };
+
   // Show loading state
   if (loading && hosts.length === 0) {
     return (
@@ -481,6 +488,8 @@ function App() {
       <main className="main-content">
         {currentView === 'logs' ? (
           <LogsPage />
+        ) : currentView === 'files' ? (
+          <RemoteFilesPage hosts={hosts} preferredHost={preferredFileHost} />
         ) : (
           <>
             {error && (
@@ -506,6 +515,7 @@ function App() {
               hosts={paginatedHosts}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
+              onManageFiles={handleManageFiles}
               selectedHostIds={selectedHostIds}
               onToggleHostSelection={handleToggleHostSelection}
               onToggleSelectAllVisible={handleToggleSelectAllVisible}

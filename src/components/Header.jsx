@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, FileText } from 'lucide-react';
+import { Home, FileText, FolderOpen } from 'lucide-react';
 import './Header.css';
 
 const Header = ({ onRefresh, loading, lastUpdated, onNavigate, currentView }) => {
@@ -34,7 +34,18 @@ const Header = ({ onRefresh, loading, lastUpdated, onNavigate, currentView }) =>
                 <FileText size={18} />
                 <span>Logs</span>
               </button>
-              <div className={`nav-toggle-slider ${currentView === 'logs' ? 'slide-right' : ''}`}></div>
+              <button
+                className={`nav-toggle-btn ${currentView === 'files' ? 'active' : ''}`}
+                onClick={() => onNavigate('files')}
+              >
+                <FolderOpen size={18} />
+                <span>Remote Files</span>
+              </button>
+              <div
+                className={`nav-toggle-slider ${
+                  currentView === 'dashboard' ? 'slide-0' : currentView === 'logs' ? 'slide-1' : 'slide-2'
+                }`}
+              ></div>
             </div>
           </div>
           {lastUpdated && (
