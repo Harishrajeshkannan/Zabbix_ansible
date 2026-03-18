@@ -1,42 +1,30 @@
 .table-container {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: none;
   overflow: hidden;
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  animation: fadeInScale 0.4s ease-out;
-}
-
-@keyframes fadeInScale {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  border: 1px solid #e2e6ed;
 }
 
 .host-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: 12px;
 }
 
 .host-table thead {
-  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
-  border-bottom: 2px solid #e5e7eb;
+  background: #f8f9fb;
+  border-bottom: 1px solid #e2e6ed;
 }
 
 .host-table th {
-  padding: 1rem;
+  padding: 12px 14px;
   text-align: left;
   font-weight: 600;
-  color: #374151;
-  font-size: 0.813rem;
+  color: #9ca3af;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
 }
 
 .select-col {
@@ -56,13 +44,12 @@
 }
 
 .host-table tbody tr {
-  border-bottom: 1px solid #f3f4f6;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-bottom: 1px solid #e2e6ed;
+  transition: background-color 0.2s ease;
 }
 
 .host-table tbody tr:hover {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.02) 0%, rgba(59, 130, 246, 0.04) 50%, rgba(59, 130, 246, 0.02) 100%);
-  transform: scale(1.001);
+  background: #f0f4ff;
 }
 
 .host-table tbody tr:last-child {
@@ -70,8 +57,8 @@
 }
 
 .host-table td {
-  padding: 1rem;
-  color: #1f2937;
+  padding: 12px 14px;
+  color: #4b5563;
   vertical-align: middle;
 }
 
@@ -82,17 +69,18 @@
 .hostname-content {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 2px;
 }
 
 .hostname {
-  color: #1f2937;
-  font-weight: 600;
+  color: #111827;
+  font-weight: 500;
 }
 
 .host-ip {
-  font-size: 0.75rem;
-  color: #6b7280;
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: 'IBM Plex Mono', monospace;
 }
 
 .os-cell {
@@ -102,63 +90,86 @@
 }
 
 .os-name {
-  color: #374151;
+  color: #4b5563;
 }
 
 .version-cell {
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 0.813rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
   color: #4b5563;
 }
 
 .latest-version {
   display: inline-flex;
   align-items: center;
-  padding: 0.25rem 0.5rem;
-  background-color: #dbeafe;
-  color: #1e40af;
-  border-radius: 4px;
-  font-weight: 600;
+  padding: 2px 8px;
+  background-color: #f8f9fb;
+  color: #4b5563;
+  border: 1px solid #d0d6df;
+  border-radius: 3px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .not-available {
   color: #9ca3af;
   font-style: italic;
-  font-family: system-ui;
+  font-family: 'IBM Plex Mono', monospace;
 }
 
 .status-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.375rem 0.875rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   border: 1px solid;
-  transition: all 0.2s ease;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.status-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .status-success {
-  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  background: #f0fdf4;
   color: #065f46;
-  border-color: #6ee7b7;
+  border-color: #bbf7d0;
+}
+
+.status-success::before {
+  background: #059669;
 }
 
 .status-warning {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #92400e;
-  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.status-warning::before {
+  background: #d97706;
 }
 
 .status-error {
-  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  color: #991b1b;
-  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.status-error::before {
+  background: #dc2626;
 }
 
 .actions-cell {
@@ -168,96 +179,78 @@
 .action-group {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 6px;
 }
 
 .action-btn {
-  padding: 0.5rem 1.125rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.813rem;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  position: relative;
-  overflow: hidden;
-}
-
-.action-btn::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
-  transform: translate(-50%, -50%);
-  transition: width 0.6s, height 0.6s;
-}
-
-.action-btn:hover::before {
-  width: 300px;
-  height: 300px;
+  border: 1px solid transparent;
 }
 
 .action-install {
-  background-color: #3b82f6;
-  color: white;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
 }
 
 .action-install:hover {
-  background-color: #2563eb;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
+  background: #dbeafe;
 }
 
 .action-update {
-  background-color: #f59e0b;
-  color: white;
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
 }
 
 .action-update:hover {
-  background-color: #d97706;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(245, 158, 11, 0.3);
+  background: #fef3c7;
 }
 
 .action-files {
-  background-color: #0f766e;
-  color: white;
+  background: #f9fafb;
+  border-color: #e2e6ed;
+  color: #4b5563;
 }
 
 .action-files:hover {
-  background-color: #0d5f59;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(15, 118, 110, 0.3);
+  background: #f3f4f6;
 }
 
 .action-none {
-  color: #6b7280;
-  font-size: 0.813rem;
+  color: #9ca3af;
+  font-size: 11px;
   font-style: italic;
 }
 
 .no-data {
   text-align: center;
-  padding: 3rem 1rem !important;
-  color: #6b7280;
+  padding: 36px 14px !important;
+  color: #4b5563;
   font-style: italic;
+}
+
+.host-table tbody td:nth-child(3) {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #4b5563;
+  font-size: 11px;
 }
 
 @media (max-width: 1024px) {
   .host-table {
-    font-size: 0.813rem;
+    font-size: 11px;
   }
   
   .host-table th,
   .host-table td {
-    padding: 0.75rem;
+    padding: 10px 12px;
   }
 }
 
