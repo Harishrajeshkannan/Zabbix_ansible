@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import crypto from 'crypto';
+import { Buffer } from 'buffer';
 import { Client as SSHClient } from 'ssh2';
 
 const execAsync = promisify(exec);
@@ -135,10 +136,40 @@ async function uploadBufferSSH(conn, content, remotePath) {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
 
-      const stream = sftp.createWriteStream(remotePath, { mode: 0o600 });
-      stream.on('error', reject);
-      stream.on('finish', resolve);
-      stream.end(content, 'utf8');
+      let settled = false;
+      const done = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+
+      const timeoutId = setTimeout(() => {
+        done(new Error('SFTP upload timeout while writing remote temp file'));
+      }, 30000);
+
+      const buffer = Buffer.from(content, 'utf8');
+
+      sftp.open(remotePath, 'w', 0o600, (openErr, handle) => {
+        if (openErr) {
+          return done(openErr);
+        }
+
+        sftp.write(handle, buffer, 0, buffer.length, 0, (writeErr) => {
+          if (writeErr) {
+            sftp.close(handle, () => done(writeErr));
+            return;
+          }
+
+          sftp.close(handle, (closeErr) => {
+            done(closeErr || null);
+          });
+        });
+      });
     });
   });
 }
@@ -1133,6 +1164,7 @@ app.post('/api/remote-files/write', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error(`[REMOTE-FILES] Write failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
     return res.status(500).json({
       error: 'Failed to write remote file',
       details: error.message
@@ -1230,6 +1262,7 @@ app.post('/api/remote-files/create', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error(`[REMOTE-FILES] Create failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
     return res.status(500).json({
       error: 'Failed to create remote file',
       details: error.message
