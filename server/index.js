@@ -1085,7 +1085,7 @@ app.post('/api/remote-files/write', async (req, res) => {
       password: sshPassword
     });
 
-    if (Number.isFinite(Number(previousMtime))) {
+    if (previousMtime !== undefined && previousMtime !== null && previousMtime !== '' && Number.isFinite(Number(previousMtime))) {
       const mtimeResult = await executeSSHCommand(connection, `sudo -n stat -c "%Y" ${safePath} 2>/dev/null`);
       const currentMtime = Number(mtimeResult.stdout.trim());
       if (mtimeResult.success && currentMtime && currentMtime !== Number(previousMtime)) {
@@ -1098,8 +1098,17 @@ app.post('/api/remote-files/write', async (req, res) => {
 
     await uploadBufferSSH(connection, content, tempPath);
 
-    const installCmd = `sudo -n install -m 0644 ${safeTempPath} ${safePath}`;
-    const writeResult = await executeSSHCommand(connection, installCmd);
+    const installCmd = `sudo -n /usr/bin/install -m 0644 ${safeTempPath} ${safePath}`;
+    let writeResult = await executeSSHCommand(connection, installCmd);
+
+    // Fallback for systems/sudo policies where install is unavailable or blocked.
+    if (!writeResult.success) {
+      writeResult = await executeSSHCommand(
+        connection,
+        `sudo -n cp ${safeTempPath} ${safePath} && sudo -n chmod 0644 ${safePath}`
+      );
+    }
+
     await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
 
     if (!writeResult.success) {
@@ -1186,8 +1195,17 @@ app.post('/api/remote-files/create', async (req, res) => {
     }
 
     await uploadBufferSSH(connection, content, tempPath);
-    const installCmd = `sudo -n install -m 0644 ${safeTempPath} ${safePath}`;
-    const createResult = await executeSSHCommand(connection, installCmd);
+    const installCmd = `sudo -n /usr/bin/install -m 0644 ${safeTempPath} ${safePath}`;
+    let createResult = await executeSSHCommand(connection, installCmd);
+
+    // Fallback for systems/sudo policies where install is unavailable or blocked.
+    if (!createResult.success) {
+      createResult = await executeSSHCommand(
+        connection,
+        `sudo -n cp ${safeTempPath} ${safePath} && sudo -n chmod 0644 ${safePath}`
+      );
+    }
+
     await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
 
     if (!createResult.success) {
