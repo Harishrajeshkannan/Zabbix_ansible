@@ -2,7 +2,7 @@
  * Version Service - Manages Zabbix Agent versions for RHEL
  */
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_BACKEND_API_URL || '/api';
 
 /**
  * Fetch available Zabbix agent versions from RHEL repositories

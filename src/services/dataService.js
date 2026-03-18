@@ -139,13 +139,20 @@ export const deriveHostGroupsFromHosts = (hosts) => {
 export const fetchAllData = async () => {
   try {
     // Fetch latest agent version (from search API or fallback config)
-    const latestVersion = await getLatestAgentVersion();
+    let latestVersion = await getLatestAgentVersion();
     
     // Fetch available versions for installation - only from scraping
     let availableVersions = [latestVersion];
     try {
       const versionsData = await fetchAgentVersions();
       availableVersions = versionsData.versions || [latestVersion];
+
+      // If backend returned a fresher latest value, prefer it over any earlier fallback.
+      if (versionsData.latest) {
+        latestVersion = versionsData.latest;
+      } else if (availableVersions.length > 0) {
+        latestVersion = availableVersions[0];
+      }
     } catch (error) {
       console.warn('Could not fetch versions from Zabbix download page, using latest version only:', error.message);
       // Continue with just the latest version
