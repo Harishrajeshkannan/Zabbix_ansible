@@ -277,6 +277,57 @@ export const createRemoteFile = async (payload) => {
   }
 };
 
+/**
+ * Create a new directory under /etc/zabbix on remote server
+ * @param {Object} payload - SSH context, target directory and folder name
+ */
+export const createRemoteDirectory = async (payload) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/remote-files/mkdir`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to create remote directory:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload local files/folders to /etc/zabbix on remote server
+ * @param {FormData} formData - multipart payload with files and SSH context
+ */
+export const uploadRemoteFiles = async (formData) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/remote-files/upload`, {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to upload remote files:', error);
+    throw error;
+  }
+};
+
 export default {
   logAgentAction,
   getLogFiles,
@@ -286,5 +337,7 @@ export default {
   listRemoteFiles,
   readRemoteFile,
   writeRemoteFile,
-  createRemoteFile
+  createRemoteFile,
+  createRemoteDirectory,
+  uploadRemoteFiles
 };

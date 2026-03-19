@@ -8,10 +8,18 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import { Buffer } from 'buffer';
 import { Client as SSHClient } from 'ssh2';
+import multer from 'multer';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 200,
+    fileSize: 20 * 1024 * 1024
+  }
+});
 
 // ============= HELPER FUNCTIONS =============
 
@@ -152,7 +160,7 @@ async function uploadBufferSSH(conn, content, remotePath) {
         done(new Error('SFTP upload timeout while writing remote temp file'));
       }, 30000);
 
-      const buffer = Buffer.from(content, 'utf8');
+      const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
 
       sftp.open(remotePath, 'w', 0o600, (openErr, handle) => {
         if (openErr) {
@@ -1265,6 +1273,206 @@ app.post('/api/remote-files/create', async (req, res) => {
     console.error(`[REMOTE-FILES] Create failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
     return res.status(500).json({
       error: 'Failed to create remote file',
+      details: error.message
+    });
+  } finally {
+    if (connection) connection.end();
+  }
+});
+
+/**
+ * Remote file manager - create a new directory under /etc/zabbix
+ */
+app.post('/api/remote-files/mkdir', async (req, res) => {
+  let connection = null;
+
+  try {
+    const {
+      host,
+      sshPort = 22,
+      sshUser,
+      sshPassword = '',
+      directoryPath = '',
+      folderName
+    } = req.body;
+
+    if (!host || !sshUser || !folderName) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'host, sshUser, and folderName are required'
+      });
+    }
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(folderName)) {
+      return res.status(400).json({
+        error: 'Invalid folder name',
+        details: 'Allowed characters: letters, numbers, dot, underscore, dash'
+      });
+    }
+
+    const targetRelative = directoryPath ? `${directoryPath}/${folderName}` : folderName;
+    const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
+    const safePath = shellQuote(pathInfo.absolute);
+
+    connection = await connectSSH({
+      host,
+      port: sshPort,
+      username: sshUser,
+      password: sshPassword
+    });
+
+    const existsResult = await executeSSHCommand(connection, `sudo -n test -e ${safePath} && echo exists || echo missing`);
+    if (existsResult.stdout.includes('exists')) {
+      return res.status(409).json({
+        error: 'Path already exists',
+        details: `A file or folder named ${folderName} already exists in this directory`
+      });
+    }
+
+    const mkdirResult = await executeSSHCommand(connection, `sudo -n mkdir -m 0755 ${safePath}`);
+    if (!mkdirResult.success) {
+      return res.status(500).json({
+        error: 'Failed to create directory',
+        details: mkdirResult.stderr || mkdirResult.stdout || 'Unable to create directory'
+      });
+    }
+
+    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
+    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
+
+    console.log(`[REMOTE-FILES] Created directory ${pathInfo.absolute} on ${host} by ${sshUser}`);
+
+    return res.json({
+      success: true,
+      relativePath: pathInfo.relative,
+      metadata: {
+        size: Number(sizeStr) || 0,
+        mtime: Number(mtimeStr) || 0,
+        mode
+      }
+    });
+  } catch (error) {
+    console.error(`[REMOTE-FILES] Create directory failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
+    return res.status(500).json({
+      error: 'Failed to create remote directory',
+      details: error.message
+    });
+  } finally {
+    if (connection) connection.end();
+  }
+});
+
+/**
+ * Remote file manager - upload local files/folders to /etc/zabbix
+ */
+app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => {
+  let connection = null;
+
+  try {
+    const {
+      host,
+      sshPort = 22,
+      sshUser,
+      sshPassword = '',
+      directoryPath = ''
+    } = req.body;
+
+    if (!host || !sshUser) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'host and sshUser are required'
+      });
+    }
+
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      return res.status(400).json({
+        error: 'No files uploaded',
+        details: 'Provide at least one file in files[]'
+      });
+    }
+
+    const rawRelativePaths = req.body.relativePaths;
+    const relativePaths = Array.isArray(rawRelativePaths)
+      ? rawRelativePaths
+      : (typeof rawRelativePaths === 'string' ? [rawRelativePaths] : []);
+
+    connection = await connectSSH({
+      host,
+      port: Number(sshPort) || 22,
+      username: sshUser,
+      password: sshPassword
+    });
+
+    const uploaded = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const providedRelative = relativePaths[i] || file.originalname || '';
+      const normalizedClientRelative = String(providedRelative).replace(/\\/g, '/').replace(/^\/+/, '');
+
+      if (!normalizedClientRelative || normalizedClientRelative.endsWith('/')) {
+        throw new Error(`Invalid uploaded file path: ${providedRelative || '<empty>'}`);
+      }
+
+      const targetRelative = directoryPath
+        ? `${directoryPath}/${normalizedClientRelative}`
+        : normalizedClientRelative;
+
+      const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
+      const safePath = shellQuote(pathInfo.absolute);
+      const parentPath = path.posix.dirname(pathInfo.absolute);
+      const safeParentPath = shellQuote(parentPath);
+      const tempPath = `/tmp/zabbix-portal-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
+      const safeTempPath = shellQuote(tempPath);
+
+      const mkdirResult = await executeSSHCommand(connection, `sudo -n mkdir -p -m 0755 ${safeParentPath}`);
+      if (!mkdirResult.success) {
+        throw new Error(mkdirResult.stderr || mkdirResult.stdout || `Failed to create parent directory for ${pathInfo.relative}`);
+      }
+
+      await uploadBufferSSH(connection, file.buffer, tempPath);
+
+      const installCmd = `sudo -n /usr/bin/install -m 0644 ${safeTempPath} ${safePath}`;
+      let writeResult = await executeSSHCommand(connection, installCmd);
+
+      if (!writeResult.success) {
+        writeResult = await executeSSHCommand(
+          connection,
+          `sudo -n cp ${safeTempPath} ${safePath} && sudo -n chmod 0644 ${safePath}`
+        );
+      }
+
+      await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
+
+      if (!writeResult.success) {
+        throw new Error(writeResult.stderr || writeResult.stdout || `Failed to upload ${pathInfo.relative}`);
+      }
+
+      const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
+      const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
+
+      uploaded.push({
+        relativePath: pathInfo.relative,
+        metadata: {
+          size: Number(sizeStr) || 0,
+          mtime: Number(mtimeStr) || 0,
+          mode
+        }
+      });
+    }
+
+    console.log(`[REMOTE-FILES] Uploaded ${uploaded.length} file(s) to ${host} by ${sshUser}`);
+
+    return res.json({
+      success: true,
+      uploadedCount: uploaded.length,
+      uploaded
+    });
+  } catch (error) {
+    console.error(`[REMOTE-FILES] Upload failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
+    return res.status(500).json({
+      error: 'Failed to upload files to remote server',
       details: error.message
     });
   } finally {

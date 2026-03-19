@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Folder, FileText, RefreshCw, Save, PlusCircle } from 'lucide-react';
+import { Folder, FileText, RefreshCw, Save, PlusCircle, FolderPlus, Upload } from 'lucide-react';
 import {
   listRemoteFiles,
   readRemoteFile,
   writeRemoteFile,
-  createRemoteFile
+  createRemoteFile,
+  createRemoteDirectory,
+  uploadRemoteFiles
 } from '../services/backendService';
 import './RemoteFilesPage.css';
 
@@ -37,6 +39,8 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fileMeta, setFileMeta] = useState({ mtime: null, size: 0, mode: '' });
+  const fileUploadInputRef = useRef(null);
+  const folderUploadInputRef = useRef(null);
 
   useEffect(() => {
     if (!preferredHost) return;
@@ -159,6 +163,70 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     }
   };
 
+  const createDirectory = async () => {
+    const folderName = window.prompt('New folder name (e.g., conf.d):');
+    if (!folderName) return;
+
+    try {
+      await createRemoteDirectory({
+        ...connection,
+        sshPort: Number(connection.sshPort),
+        directoryPath: currentPath,
+        folderName
+      });
+
+      toast.success(`Created folder ${folderName}`);
+      await runList(currentPath);
+    } catch (error) {
+      toast.error(`Create folder failed: ${error.message}`);
+    }
+  };
+
+  const handleUpload = async (files, isFolderUpload = false) => {
+    if (!connected) {
+      toast.error('Connect to a host before uploading');
+      return;
+    }
+
+    if (!files.length) return;
+
+    const formData = new FormData();
+    formData.append('host', connection.host);
+    formData.append('sshPort', String(Number(connection.sshPort) || 22));
+    formData.append('sshUser', connection.sshUser);
+    formData.append('sshPassword', connection.sshPassword || '');
+    formData.append('directoryPath', currentPath || '');
+
+    files.forEach((file) => {
+      const relativePath = isFolderUpload && file.webkitRelativePath
+        ? file.webkitRelativePath
+        : file.name;
+      formData.append('files', file, file.name);
+      formData.append('relativePaths', relativePath);
+    });
+
+    const toastId = toast.loading(`Uploading ${files.length} file(s)...`);
+    try {
+      const result = await uploadRemoteFiles(formData);
+      toast.success(`Uploaded ${result.uploadedCount || files.length} file(s)`, { id: toastId });
+      await runList(currentPath);
+    } catch (error) {
+      toast.error(`Upload failed: ${error.message}`, { id: toastId });
+    }
+  };
+
+  const onFileUploadChange = async (event) => {
+    const files = Array.from(event.target.files || []);
+    await handleUpload(files, false);
+    event.target.value = '';
+  };
+
+  const onFolderUploadChange = async (event) => {
+    const files = Array.from(event.target.files || []);
+    await handleUpload(files, true);
+    event.target.value = '';
+  };
+
   const onHostChange = (hostId) => {
     const host = hostOptions.find((h) => String(h.id) === hostId);
     if (!host) return;
@@ -234,6 +302,22 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
       </form>
 
       <div className="workspace">
+        <input
+          ref={fileUploadInputRef}
+          type="file"
+          multiple
+          onChange={onFileUploadChange}
+          style={{ display: 'none' }}
+        />
+        <input
+          ref={folderUploadInputRef}
+          type="file"
+          webkitdirectory=""
+          directory=""
+          multiple
+          onChange={onFolderUploadChange}
+          style={{ display: 'none' }}
+        />
         <div className="browser-pane">
           <div className="pane-toolbar">
             <div className="path-text">{DEFAULT_ROOT}{currentPath ? `/${currentPath}` : ''}</div>
@@ -246,6 +330,18 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
               <button type="button" onClick={createFile} disabled={!connected}>
                 <PlusCircle size={14} />
                 New File
+              </button>
+              <button type="button" onClick={createDirectory} disabled={!connected}>
+                <FolderPlus size={14} />
+                New Folder
+              </button>
+              <button type="button" onClick={() => fileUploadInputRef.current?.click()} disabled={!connected}>
+                <Upload size={14} />
+                Upload Files
+              </button>
+              <button type="button" onClick={() => folderUploadInputRef.current?.click()} disabled={!connected}>
+                <Upload size={14} />
+                Upload Folder
               </button>
             </div>
           </div>
