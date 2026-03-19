@@ -117,12 +117,15 @@
   padding: 10px 12px;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 10px;
   background: #f8f9fb;
 }
 
 .path-text {
+  flex: 1 1 180px;
+  min-width: 0;
   font-size: 11px;
   color: #4b5563;
   font-family: 'IBM Plex Mono', monospace;
@@ -133,7 +136,10 @@
 
 .toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+  margin-left: auto;
 }
 
 .toolbar-actions button,
