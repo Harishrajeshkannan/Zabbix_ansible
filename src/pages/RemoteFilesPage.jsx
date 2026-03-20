@@ -38,7 +38,10 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
   const [fileContent, setFileContent] = useState('');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [fileMeta, setFileMeta] = useState({ mtime: null, size: 0, mode: '' });
+  const [selectedUploadHostIds, setSelectedUploadHostIds] = useState([]);
+  const [bulkUploadPath, setBulkUploadPath] = useState('');
   const fileUploadInputRef = useRef(null);
   const folderUploadInputRef = useRef(null);
 
@@ -60,6 +63,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
         relativePath
       });
       setCurrentPath(data.currentPath || '');
+      setBulkUploadPath(data.currentPath || '');
       setItems(data.items || []);
       setConnected(true);
     } catch (error) {
@@ -182,36 +186,106 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     }
   };
 
+  const toggleUploadHost = (hostId) => {
+    setSelectedUploadHostIds((prev) => (
+      prev.includes(hostId)
+        ? prev.filter((id) => id !== hostId)
+        : [...prev, hostId]
+    ));
+  };
+
+  const selectAllUploadHosts = () => {
+    setSelectedUploadHostIds(hostOptions.map((host) => String(host.id ?? host.hostname)));
+  };
+
+  const clearUploadHosts = () => {
+    setSelectedUploadHostIds([]);
+  };
+
+  const resolveUploadTargets = () => {
+    if (selectedUploadHostIds.length > 0) {
+      return hostOptions
+        .filter((host) => selectedUploadHostIds.includes(String(host.id ?? host.hostname)))
+        .map((host) => resolvePreferredSSHHost(host))
+        .filter(Boolean);
+    }
+
+    return connection.host ? [connection.host] : [];
+  };
+
+  const normalizeUploadPath = (value) => String(value || '').trim().replace(/^\/+/, '');
+
   const handleUpload = async (files, isFolderUpload = false) => {
-    if (!connected) {
-      toast.error('Connect to a host before uploading');
+    if (!connection.sshUser) {
+      toast.error('SSH user is required for upload');
       return;
     }
 
     if (!files.length) return;
 
-    const formData = new FormData();
-    formData.append('host', connection.host);
-    formData.append('sshPort', String(Number(connection.sshPort) || 22));
-    formData.append('sshUser', connection.sshUser);
-    formData.append('sshPassword', connection.sshPassword || '');
-    formData.append('directoryPath', currentPath || '');
+    const targets = resolveUploadTargets();
+    if (targets.length === 0) {
+      toast.error('Select at least one target host or set SSH host');
+      return;
+    }
 
-    files.forEach((file) => {
-      const relativePath = isFolderUpload && file.webkitRelativePath
-        ? file.webkitRelativePath
-        : file.name;
-      formData.append('files', file, file.name);
-      formData.append('relativePaths', relativePath);
-    });
+    const targetDirectory = normalizeUploadPath(bulkUploadPath || currentPath || '');
 
-    const toastId = toast.loading(`Uploading ${files.length} file(s)...`);
+    const toastId = toast.loading(`Uploading ${files.length} file(s) to 1/${targets.length} host(s)...`);
+    const failures = [];
+    let successCount = 0;
+
+    setUploading(true);
     try {
-      const result = await uploadRemoteFiles(formData);
-      toast.success(`Uploaded ${result.uploadedCount || files.length} file(s)`, { id: toastId });
+      for (let i = 0; i < targets.length; i++) {
+        const targetHost = targets[i];
+        toast.loading(`Uploading to ${i + 1}/${targets.length}: ${targetHost}`, { id: toastId });
+
+        const formData = new FormData();
+        formData.append('host', targetHost);
+        formData.append('sshPort', String(Number(connection.sshPort) || 22));
+        formData.append('sshUser', connection.sshUser);
+        formData.append('sshPassword', connection.sshPassword || '');
+        formData.append('directoryPath', targetDirectory);
+
+        files.forEach((file) => {
+          const relativePath = isFolderUpload && file.webkitRelativePath
+            ? file.webkitRelativePath
+            : file.name;
+          formData.append('files', file, file.name);
+          formData.append('relativePaths', relativePath);
+        });
+
+        try {
+          await uploadRemoteFiles(formData);
+          successCount += 1;
+        } catch (error) {
+          failures.push({ host: targetHost, message: error.message });
+        }
+      }
+
+      if (failures.length === 0) {
+        toast.success(
+          `Uploaded ${files.length} file(s) to ${successCount}/${targets.length} host(s) at ${DEFAULT_ROOT}${targetDirectory ? `/${targetDirectory}` : ''}`,
+          { id: toastId }
+        );
+      } else {
+        const failureSummary = failures
+          .slice(0, 3)
+          .map((item) => `${item.host}: ${item.message}`)
+          .join(' | ');
+
+        toast.error(
+          `Upload finished with failures (${successCount}/${targets.length} hosts succeeded)`,
+          { id: toastId, description: failureSummary }
+        );
+      }
+
       await runList(currentPath);
     } catch (error) {
       toast.error(`Upload failed: ${error.message}`, { id: toastId });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -301,6 +375,75 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
         </button>
       </form>
 
+      <section className="upload-panel">
+        <div className="upload-panel-header">
+          <h2>Bulk Upload</h2>
+          <p>Send selected local files or folders to multiple servers at one common target path.</p>
+        </div>
+
+        <div className="upload-grid">
+          <div className="field">
+            <label>Common target path (under {DEFAULT_ROOT})</label>
+            <input
+              type="text"
+              value={bulkUploadPath}
+              onChange={(e) => setBulkUploadPath(normalizeUploadPath(e.target.value))}
+              placeholder="Example: conf.d/custom"
+            />
+          </div>
+
+          <div className="upload-hosts">
+            <div className="upload-hosts-header">
+              <label>Target hosts</label>
+              <div className="upload-hosts-actions">
+                <button type="button" onClick={selectAllUploadHosts}>Select all</button>
+                <button type="button" onClick={clearUploadHosts}>Clear</button>
+              </div>
+            </div>
+
+            <div className="upload-host-list">
+              {hostOptions.map((host) => {
+                const hostId = String(host.id ?? host.hostname);
+                return (
+                  <label key={hostId} className="upload-host-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedUploadHostIds.includes(hostId)}
+                      onChange={() => toggleUploadHost(hostId)}
+                    />
+                    <span>{host.hostname} ({resolvePreferredSSHHost(host)})</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="upload-hint">
+              If no hosts are selected, upload targets the SSH Host field above.
+            </div>
+          </div>
+
+          <div className="upload-actions">
+            <button
+              type="button"
+              className="upload-btn"
+              onClick={() => fileUploadInputRef.current?.click()}
+              disabled={uploading}
+            >
+              <Upload size={14} />
+              {uploading ? 'Uploading...' : 'Upload Files'}
+            </button>
+            <button
+              type="button"
+              className="upload-btn"
+              onClick={() => folderUploadInputRef.current?.click()}
+              disabled={uploading}
+            >
+              <Upload size={14} />
+              {uploading ? 'Uploading...' : 'Upload Folder'}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <div className="workspace">
         <input
           ref={fileUploadInputRef}
@@ -334,14 +477,6 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
               <button type="button" onClick={createDirectory} disabled={!connected}>
                 <FolderPlus size={14} />
                 New Folder
-              </button>
-              <button type="button" onClick={() => fileUploadInputRef.current?.click()} disabled={!connected}>
-                <Upload size={14} />
-                Upload Files
-              </button>
-              <button type="button" onClick={() => folderUploadInputRef.current?.click()} disabled={!connected}>
-                <Upload size={14} />
-                Upload Folder
               </button>
             </div>
           </div>
