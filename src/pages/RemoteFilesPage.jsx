@@ -24,13 +24,11 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     [hosts]
   );
 
-  const [connection, setConnection] = useState({
-    host: '',
-    sshPort: '22',
-    sshUser: '',
-    sshPassword: ''
-  });
+  const [browseHost, setBrowseHost] = useState('');
+  const [connectedBrowseHost, setConnectedBrowseHost] = useState('');
   const [connected, setConnected] = useState(false);
+  const [connectingBrowse, setConnectingBrowse] = useState(false);
+  const [connectingBulk, setConnectingBulk] = useState(false);
   const [currentPath, setCurrentPath] = useState('');
   const [items, setItems] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
@@ -41,6 +39,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
   const [uploading, setUploading] = useState(false);
   const [fileMeta, setFileMeta] = useState({ mtime: null, size: 0, mode: '' });
   const [selectedUploadHostIds, setSelectedUploadHostIds] = useState([]);
+  const [bulkConnectedHostTargets, setBulkConnectedHostTargets] = useState([]);
   const [bulkUploadPath, setBulkUploadPath] = useState('');
   const fileUploadInputRef = useRef(null);
   const folderUploadInputRef = useRef(null);
@@ -48,18 +47,14 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
   useEffect(() => {
     if (!preferredHost) return;
 
-    setConnection((prev) => ({
-      ...prev,
-      host: resolvePreferredSSHHost(preferredHost)
-    }));
+    setBrowseHost(resolvePreferredSSHHost(preferredHost));
   }, [preferredHost]);
 
-  const runList = async (relativePath = '') => {
+  const runList = async (relativePath = '', hostOverride = connectedBrowseHost) => {
     setLoadingList(true);
     try {
       const data = await listRemoteFiles({
-        ...connection,
-        sshPort: Number(connection.sshPort),
+        host: hostOverride,
         relativePath
       });
       setCurrentPath(data.currentPath || '');
@@ -73,17 +68,44 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     }
   };
 
-  const handleConnect = async (e) => {
-    e.preventDefault();
-    if (!connection.host || !connection.sshUser) {
-      toast.error('Host and SSH user are required');
+  const handleBrowseConnect = async () => {
+    if (!browseHost) {
+      toast.error('Select a host for browse/edit');
       return;
     }
 
+    setConnectingBrowse(true);
     setSelectedFile('');
     setFileContent('');
     setDirty(false);
-    await runList('');
+    await runList('', browseHost);
+    setConnectedBrowseHost(browseHost);
+    setConnectingBrowse(false);
+  };
+
+  const handleBulkConnect = async () => {
+    const targets = hostOptions
+      .filter((host) => selectedUploadHostIds.includes(String(host.id ?? host.hostname)))
+      .map((host) => resolvePreferredSSHHost(host))
+      .filter(Boolean);
+
+    if (targets.length === 0) {
+      toast.error('Select at least one host for bulk upload');
+      return;
+    }
+
+    setConnectingBulk(true);
+
+    try {
+      // Validate first host so users get immediate feedback.
+      await listRemoteFiles({ host: targets[0], relativePath: '' });
+      setBulkConnectedHostTargets(targets);
+      toast.success(`Connected bulk upload target(s): ${targets.length}`);
+    } catch (error) {
+      toast.error(`Bulk connect failed: ${error.message}`);
+    } finally {
+      setConnectingBulk(false);
+    }
   };
 
   const openFolder = async (item) => {
@@ -107,8 +129,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
 
     try {
       const data = await readRemoteFile({
-        ...connection,
-        sshPort: Number(connection.sshPort),
+        host: connectedBrowseHost,
         relativePath: item.relativePath
       });
       setSelectedFile(data.relativePath);
@@ -126,8 +147,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     setSaving(true);
     try {
       const data = await writeRemoteFile({
-        ...connection,
-        sshPort: Number(connection.sshPort),
+        host: connectedBrowseHost,
         relativePath: selectedFile,
         content: fileContent,
         previousMtime: fileMeta.mtime
@@ -149,8 +169,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
 
     try {
       const data = await createRemoteFile({
-        ...connection,
-        sshPort: Number(connection.sshPort),
+        host: connectedBrowseHost,
         directoryPath: currentPath,
         fileName,
         content: ''
@@ -173,8 +192,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
 
     try {
       await createRemoteDirectory({
-        ...connection,
-        sshPort: Number(connection.sshPort),
+        host: connectedBrowseHost,
         directoryPath: currentPath,
         folderName
       });
@@ -200,32 +218,19 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
 
   const clearUploadHosts = () => {
     setSelectedUploadHostIds([]);
+    setBulkConnectedHostTargets([]);
   };
 
-  const resolveUploadTargets = () => {
-    if (selectedUploadHostIds.length > 0) {
-      return hostOptions
-        .filter((host) => selectedUploadHostIds.includes(String(host.id ?? host.hostname)))
-        .map((host) => resolvePreferredSSHHost(host))
-        .filter(Boolean);
-    }
-
-    return connection.host ? [connection.host] : [];
-  };
+  const resolveUploadTargets = () => bulkConnectedHostTargets;
 
   const normalizeUploadPath = (value) => String(value || '').trim().replace(/^\/+/, '');
 
   const handleUpload = async (files, isFolderUpload = false) => {
-    if (!connection.sshUser) {
-      toast.error('SSH user is required for upload');
-      return;
-    }
-
     if (!files.length) return;
 
     const targets = resolveUploadTargets();
     if (targets.length === 0) {
-      toast.error('Select at least one target host or set SSH host');
+      toast.error('Connect bulk upload hosts first');
       return;
     }
 
@@ -243,9 +248,6 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
 
         const formData = new FormData();
         formData.append('host', targetHost);
-        formData.append('sshPort', String(Number(connection.sshPort) || 22));
-        formData.append('sshUser', connection.sshUser);
-        formData.append('sshPassword', connection.sshPassword || '');
         formData.append('directoryPath', targetDirectory);
 
         files.forEach((file) => {
@@ -305,10 +307,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     const host = hostOptions.find((h) => String(h.id) === hostId);
     if (!host) return;
 
-    setConnection((prev) => ({
-      ...prev,
-      host: resolvePreferredSSHHost(host)
-    }));
+    setBrowseHost(resolvePreferredSSHHost(host));
   };
 
   return (
@@ -317,63 +316,6 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
         <h1>Remote File Manager</h1>
         <p>Browse and edit files under {DEFAULT_ROOT} through SSH.</p>
       </div>
-
-      <form className="ssh-panel" onSubmit={handleConnect}>
-        <div className="field">
-          <label>Host from inventory</label>
-          <select onChange={(e) => onHostChange(e.target.value)} defaultValue="">
-            <option value="">Select host</option>
-            {hostOptions.map((host) => (
-              <option key={host.id} value={host.id}>
-                {host.hostname} ({resolvePreferredSSHHost(host)})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label>SSH Host</label>
-          <input
-            type="text"
-            value={connection.host}
-            onChange={(e) => setConnection((prev) => ({ ...prev, host: e.target.value }))}
-            placeholder="192.168.1.100"
-            required
-          />
-        </div>
-        <div className="field compact">
-          <label>Port</label>
-          <input
-            type="number"
-            value={connection.sshPort}
-            onChange={(e) => setConnection((prev) => ({ ...prev, sshPort: e.target.value }))}
-            min="1"
-            max="65535"
-            required
-          />
-        </div>
-        <div className="field">
-          <label>SSH User</label>
-          <input
-            type="text"
-            value={connection.sshUser}
-            onChange={(e) => setConnection((prev) => ({ ...prev, sshUser: e.target.value }))}
-            placeholder="zabbixadmin"
-            required
-          />
-        </div>
-        <div className="field">
-          <label>SSH Password (optional)</label>
-          <input
-            type="password"
-            value={connection.sshPassword}
-            onChange={(e) => setConnection((prev) => ({ ...prev, sshPassword: e.target.value }))}
-            placeholder="Leave blank if host accepts login without password"
-          />
-        </div>
-        <button type="submit" className="connect-btn" disabled={loadingList}>
-          {loadingList ? 'Connecting...' : 'Connect'}
-        </button>
-      </form>
 
       <section className="upload-panel">
         <div className="upload-panel-header">
@@ -417,7 +359,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
               })}
             </div>
             <div className="upload-hint">
-              If no hosts are selected, upload targets the SSH Host field above.
+              Select one or more hosts, then click connect below.
             </div>
           </div>
 
@@ -425,8 +367,17 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
             <button
               type="button"
               className="upload-btn"
+              onClick={handleBulkConnect}
+              disabled={connectingBulk}
+            >
+              <Upload size={14} />
+              {connectingBulk ? 'Connecting...' : `Connect Bulk Hosts (${bulkConnectedHostTargets.length})`}
+            </button>
+            <button
+              type="button"
+              className="upload-btn"
               onClick={() => fileUploadInputRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || bulkConnectedHostTargets.length === 0}
             >
               <Upload size={14} />
               {uploading ? 'Uploading...' : 'Upload Files'}
@@ -435,7 +386,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
               type="button"
               className="upload-btn"
               onClick={() => folderUploadInputRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || bulkConnectedHostTargets.length === 0}
             >
               <Upload size={14} />
               {uploading ? 'Uploading...' : 'Upload Folder'}
@@ -502,6 +453,33 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
         </div>
 
         <div className="editor-pane">
+          <section className="ssh-panel editor-connect-panel">
+            <div className="field">
+              <label>Single host (browse/edit)</label>
+              <select onChange={(e) => onHostChange(e.target.value)} defaultValue="">
+                <option value="">Select host</option>
+                {hostOptions.map((host) => (
+                  <option key={host.id} value={host.id}>
+                    {host.hostname} ({resolvePreferredSSHHost(host)})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Selected host address</label>
+              <input
+                type="text"
+                value={browseHost}
+                onChange={(e) => setBrowseHost(e.target.value)}
+                placeholder="192.168.1.100"
+                required
+              />
+            </div>
+            <button type="button" className="connect-btn" onClick={handleBrowseConnect} disabled={connectingBrowse || loadingList}>
+              {connectingBrowse || loadingList ? 'Connecting...' : 'Connect Browse Host'}
+            </button>
+          </section>
+
           <div className="pane-toolbar">
             <div className="path-text">{selectedFile ? `${DEFAULT_ROOT}/${selectedFile}` : 'No file selected'}</div>
             <button type="button" className="save-btn" onClick={saveFile} disabled={!selectedFile || !dirty || saving}>

@@ -313,9 +313,6 @@ function App() {
 
       const payload = {
         host: resolvePreferredSSHHost(target),
-        sshPort: installData.sshPort,
-        sshUser: installData.sshUser,
-        sshPassword: installData.sshPassword,
         version: installData.version,
         serverIP: installData.serverIP,
         serverPort: installData.serverPort,

@@ -30,6 +30,15 @@
   align-items: end;
 }
 
+.editor-connect-panel {
+  border: none;
+  border-bottom: 1px solid #e2e6ed;
+  border-radius: 0;
+  background: #f8f9fb;
+  padding: 10px 12px;
+  margin: 0;
+}
+
 .field {
   display: flex;
   flex-direction: column;

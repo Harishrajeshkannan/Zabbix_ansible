@@ -1,9 +1,11 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import process from 'process';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import { Buffer } from 'buffer';
@@ -13,6 +15,9 @@ import multer from 'multer';
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DEFAULT_SSH_USER = process.env.SSH_USER || '';
+const DEFAULT_SSH_PASSWORD = process.env.SSH_PASSWORD || '';
+const DEFAULT_SSH_PORT = Number(process.env.SSH_PORT || 22);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -252,6 +257,27 @@ function normalizeRemotePath(relativePath, allowedRoot) {
     relative: normalizedRelative,
     absolute: absolutePath
   };
+}
+
+/**
+ * Resolve SSH connection options from request body + environment.
+ */
+function resolveSSHConnection(body) {
+  const host = String(body?.host || '').trim();
+  const portCandidate = Number(body?.sshPort ?? DEFAULT_SSH_PORT);
+  const port = Number.isFinite(portCandidate) && portCandidate > 0 ? portCandidate : DEFAULT_SSH_PORT;
+  const username = String(body?.sshUser || DEFAULT_SSH_USER || '').trim();
+  const password = typeof body?.sshPassword === 'string' ? body.sshPassword : DEFAULT_SSH_PASSWORD;
+
+  if (!host) {
+    throw new Error('host is required');
+  }
+
+  if (!username) {
+    throw new Error('SSH_USER is not configured in backend environment');
+  }
+
+  return { host, port, username, password };
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -627,11 +653,9 @@ app.post('/api/install-remote', async (req, res) => {
   let connection = null;
   
   try {
+    const sshConfig = resolveSSHConnection(req.body || {});
     const { 
       host,           // Remote server IP/hostname
-      sshPort = 22,   // SSH port
-      sshUser,        // SSH username  
-      sshPassword,    // SSH password
       version,        // Zabbix version
       serverIP,       // Zabbix server IP
       serverPort = 10051,  // Zabbix server port
@@ -640,18 +664,18 @@ app.post('/api/install-remote', async (req, res) => {
     } = req.body;
     
     console.log('[SSH-INSTALL] Parameters:');
-    console.log(`  Host: ${host}:${sshPort}`);
-    console.log(`  SSH User: ${sshUser}`);
+    console.log(`  Host: ${host}:${sshConfig.port}`);
+    console.log(`  SSH User: ${sshConfig.username}`);
     console.log(`  Zabbix Version: ${version}`);
     console.log(`  Zabbix Server: ${serverIP}:${serverPort}`);
     console.log(`  Agent Listen Port: ${listenerPort}`);
     console.log(`  Agent Hostname: ${hostname}\n`);
     
     // Validate required fields
-    if (!host || !sshUser || !sshPassword || !version || !serverIP || !hostname) {
+    if (!host || !version || !serverIP || !hostname) {
       return res.status(400).json({ 
         error: 'Missing required fields',
-        details: 'host, sshUser, sshPassword, version, serverIP, and hostname are required'
+        details: 'host, version, serverIP, and hostname are required'
       });
     }
     
@@ -692,21 +716,16 @@ app.post('/api/install-remote', async (req, res) => {
     }
     
     // Connect to remote server via SSH
-    console.log(`[SSH-INSTALL] Connecting to ${host}:${sshPort}...`);
+    console.log(`[SSH-INSTALL] Connecting to ${host}:${sshConfig.port}...`);
     
     try {
-      connection = await connectSSH({
-        host,
-        port: sshPort,
-        username: sshUser,
-        password: sshPassword
-      });
+      connection = await connectSSH(sshConfig);
       console.log(`[SSH-INSTALL] ✓ SSH connected successfully\n`);
     } catch (sshErr) {
       console.error(`[SSH-INSTALL] ✗ SSH connection failed: ${sshErr.message}`);
       return res.status(503).json({
         error: 'SSH connection failed',
-        details: `Cannot connect to ${host}:${sshPort} - ${sshErr.message}`
+        details: `Cannot connect to ${host}:${sshConfig.port} - ${sshErr.message}`
       });
     }
     
@@ -740,13 +759,10 @@ app.post('/api/install-remote', async (req, res) => {
       });
     }
     
-    // Execute installation on remote server with sudo password
-    // Use echo with -S flag to pass password to sudo via stdin
-    // Use absolute paths for deterministic sudoers command matching.
-    const escapedPassword = sshPassword.replace(/'/g, "'\\''"); // Escape single quotes for shell
-    const installCommand = `echo '${escapedPassword}' | sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}`;
+    // Execute installation on remote server with passwordless sudo.
+    const installCommand = `sudo -n /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}`;
     console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo -S /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}\n`);
+    console.log(`[SSH-INSTALL] sudo -n /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}\n`);
     
     let result;
     try {
@@ -791,7 +807,7 @@ app.post('/api/install-remote', async (req, res) => {
     
     // Cleanup remote script
     try {
-      const cleanupCommand = `echo '${escapedPassword}' | sudo -S /bin/rm -f ${remoteScriptPath}`;
+      const cleanupCommand = `sudo -n /bin/rm -f ${remoteScriptPath}`;
       await executeSSHCommand(connection, cleanupCommand);
       console.log(`[SSH-INSTALL] ✓ Remote cleanup completed`);
     } catch (cleanErr) {
@@ -923,30 +939,20 @@ app.post('/api/remote-files/list', async (req, res) => {
   let connection = null;
 
   try {
-    const {
-      host,
-      sshPort = 22,
-      sshUser,
-      sshPassword = '',
-      relativePath = ''
-    } = req.body;
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const { host, relativePath = '' } = req.body;
 
-    if (!host || !sshUser) {
+    if (!host) {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'host and sshUser are required'
+        details: 'host is required'
       });
     }
 
     const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
     const safePath = shellQuote(pathInfo.absolute);
 
-    connection = await connectSSH({
-      host,
-      port: sshPort,
-      username: sshUser,
-      password: sshPassword
-    });
+    connection = await connectSSH(sshConfig);
 
     const listCommand = `sudo -n ls -la ${safePath} 2>/dev/null`;
     const result = await executeSSHCommand(connection, listCommand);
@@ -1013,30 +1019,20 @@ app.post('/api/remote-files/read', async (req, res) => {
   let connection = null;
 
   try {
-    const {
-      host,
-      sshPort = 22,
-      sshUser,
-      sshPassword = '',
-      relativePath
-    } = req.body;
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const { host, relativePath } = req.body;
 
-    if (!host || !sshUser || !relativePath) {
+    if (!host || !relativePath) {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'host, sshUser, and relativePath are required'
+        details: 'host and relativePath are required'
       });
     }
 
     const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
     const safePath = shellQuote(pathInfo.absolute);
 
-    connection = await connectSSH({
-      host,
-      port: sshPort,
-      username: sshUser,
-      password: sshPassword
-    });
+    connection = await connectSSH(sshConfig);
 
     const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath} 2>/dev/null`);
     if (!statResult.success || !statResult.stdout.trim()) {
@@ -1095,20 +1091,13 @@ app.post('/api/remote-files/write', async (req, res) => {
   let connection = null;
 
   try {
-    const {
-      host,
-      sshPort = 22,
-      sshUser,
-      sshPassword = '',
-      relativePath,
-      content,
-      previousMtime
-    } = req.body;
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const { host, relativePath, content, previousMtime } = req.body;
 
-    if (!host || !sshUser || !relativePath || typeof content !== 'string') {
+    if (!host || !relativePath || typeof content !== 'string') {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'host, sshUser, relativePath, and content are required'
+        details: 'host, relativePath, and content are required'
       });
     }
 
@@ -1117,12 +1106,7 @@ app.post('/api/remote-files/write', async (req, res) => {
     const tempPath = `/tmp/zabbix-portal-edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
     const safeTempPath = shellQuote(tempPath);
 
-    connection = await connectSSH({
-      host,
-      port: sshPort,
-      username: sshUser,
-      password: sshPassword
-    });
+    connection = await connectSSH(sshConfig);
 
     if (previousMtime !== undefined && previousMtime !== null && previousMtime !== '' && Number.isFinite(Number(previousMtime))) {
       const mtimeResult = await executeSSHCommand(connection, `sudo -n stat -c "%Y" ${safePath} 2>/dev/null`);
@@ -1160,7 +1144,7 @@ app.post('/api/remote-files/write', async (req, res) => {
     const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
     const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
 
-    console.log(`[REMOTE-FILES] Saved ${pathInfo.absolute} on ${host} by ${sshUser}`);
+    console.log(`[REMOTE-FILES] Saved ${pathInfo.absolute} on ${host} by ${sshConfig.username}`);
 
     return res.json({
       success: true,
@@ -1189,20 +1173,13 @@ app.post('/api/remote-files/create', async (req, res) => {
   let connection = null;
 
   try {
-    const {
-      host,
-      sshPort = 22,
-      sshUser,
-      sshPassword = '',
-      directoryPath = '',
-      fileName,
-      content = ''
-    } = req.body;
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const { host, directoryPath = '', fileName, content = '' } = req.body;
 
-    if (!host || !sshUser || !fileName) {
+    if (!host || !fileName) {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'host, sshUser, and fileName are required'
+        details: 'host and fileName are required'
       });
     }
 
@@ -1219,12 +1196,7 @@ app.post('/api/remote-files/create', async (req, res) => {
     const tempPath = `/tmp/zabbix-portal-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
     const safeTempPath = shellQuote(tempPath);
 
-    connection = await connectSSH({
-      host,
-      port: sshPort,
-      username: sshUser,
-      password: sshPassword
-    });
+    connection = await connectSSH(sshConfig);
 
     const existsResult = await executeSSHCommand(connection, `sudo -n test -e ${safePath} && echo exists || echo missing`);
     if (existsResult.stdout.includes('exists')) {
@@ -1258,7 +1230,7 @@ app.post('/api/remote-files/create', async (req, res) => {
     const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
     const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
 
-    console.log(`[REMOTE-FILES] Created ${pathInfo.absolute} on ${host} by ${sshUser}`);
+    console.log(`[REMOTE-FILES] Created ${pathInfo.absolute} on ${host} by ${sshConfig.username}`);
 
     return res.json({
       success: true,
@@ -1287,19 +1259,13 @@ app.post('/api/remote-files/mkdir', async (req, res) => {
   let connection = null;
 
   try {
-    const {
-      host,
-      sshPort = 22,
-      sshUser,
-      sshPassword = '',
-      directoryPath = '',
-      folderName
-    } = req.body;
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const { host, directoryPath = '', folderName } = req.body;
 
-    if (!host || !sshUser || !folderName) {
+    if (!host || !folderName) {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'host, sshUser, and folderName are required'
+        details: 'host and folderName are required'
       });
     }
 
@@ -1314,12 +1280,7 @@ app.post('/api/remote-files/mkdir', async (req, res) => {
     const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
     const safePath = shellQuote(pathInfo.absolute);
 
-    connection = await connectSSH({
-      host,
-      port: sshPort,
-      username: sshUser,
-      password: sshPassword
-    });
+    connection = await connectSSH(sshConfig);
 
     const existsResult = await executeSSHCommand(connection, `sudo -n test -e ${safePath} && echo exists || echo missing`);
     if (existsResult.stdout.includes('exists')) {
@@ -1340,7 +1301,7 @@ app.post('/api/remote-files/mkdir', async (req, res) => {
     const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
     const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
 
-    console.log(`[REMOTE-FILES] Created directory ${pathInfo.absolute} on ${host} by ${sshUser}`);
+    console.log(`[REMOTE-FILES] Created directory ${pathInfo.absolute} on ${host} by ${sshConfig.username}`);
 
     return res.json({
       success: true,
@@ -1369,18 +1330,13 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
   let connection = null;
 
   try {
-    const {
-      host,
-      sshPort = 22,
-      sshUser,
-      sshPassword = '',
-      directoryPath = ''
-    } = req.body;
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const { host, directoryPath = '' } = req.body;
 
-    if (!host || !sshUser) {
+    if (!host) {
       return res.status(400).json({
         error: 'Missing required fields',
-        details: 'host and sshUser are required'
+        details: 'host is required'
       });
     }
 
@@ -1397,12 +1353,7 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
       ? rawRelativePaths
       : (typeof rawRelativePaths === 'string' ? [rawRelativePaths] : []);
 
-    connection = await connectSSH({
-      host,
-      port: Number(sshPort) || 22,
-      username: sshUser,
-      password: sshPassword
-    });
+    connection = await connectSSH(sshConfig);
 
     const uploaded = [];
 
@@ -1462,7 +1413,7 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
       });
     }
 
-    console.log(`[REMOTE-FILES] Uploaded ${uploaded.length} file(s) to ${host} by ${sshUser}`);
+    console.log(`[REMOTE-FILES] Uploaded ${uploaded.length} file(s) to ${host} by ${sshConfig.username}`);
 
     return res.json({
       success: true,

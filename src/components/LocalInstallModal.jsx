@@ -20,9 +20,6 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
 
   const [formData, setFormData] = useState({
     host: resolvePreferredSSHHost(selectedHost),
-    sshPort: '22',
-    sshUser: '',
-    sshPassword: '',
     version: latestVersion,
     serverIP: '',
     serverPort: '10051',
@@ -35,8 +32,6 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   const [installing, setInstalling] = useState(false);
   const lastInitKeyRef = useRef('');
 
-  // Initialize form only when modal target/action changes. This prevents
-  // accidental reset of a manually selected version while the modal is open.
   useEffect(() => {
     if (!selectedHost) return;
 
@@ -47,15 +42,14 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
 
     lastInitKeyRef.current = initKey;
 
-      setFormData(prev => ({
-        ...prev,
-        host: resolvePreferredSSHHost(selectedHost),
-        hostname: selectedHost.hostname || '',
-        // Pre-fill version with current version for updates
-        version: action === 'update' && selectedHost.agentVersion 
-          ? selectedHost.agentVersion 
-          : latestVersion
-      }));
+    setFormData(prev => ({
+      ...prev,
+      host: resolvePreferredSSHHost(selectedHost),
+      hostname: selectedHost.hostname || '',
+      version: action === 'update' && selectedHost.agentVersion
+        ? selectedHost.agentVersion
+        : latestVersion
+    }));
   }, [selectedHost, action, isBatchMode, latestVersion]);
 
   useEffect(() => {
@@ -75,10 +69,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInstalling(true);
-    
-    console.log('[LocalInstallModal] Form submitted');
-    console.log('[LocalInstallModal] Form data:', formData);
-    
+
     try {
       await onInstall(formData);
       onClose();
@@ -98,10 +89,10 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
           <h2>{actionTitle} Zabbix Agent via SSH</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="install-form">
           <div className="form-section">
-            <h3>SSH Connection</h3>
+            <h3>Target Host</h3>
             {isBatchMode && (
               <div className="batch-mode-note">
                 Batch mode enabled: {selectedHosts.length} hosts selected. Remote host and agent hostname are auto-filled per host.
@@ -128,13 +119,51 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               </div>
             )}
 
+            <div style={{ marginTop: '10px', padding: '10px', background: '#f0f7ff', borderRadius: '4px', fontSize: '0.9em' }}>
+              <strong>SSH credentials are loaded from backend .env</strong>
+              <br />
+              Configure SSH_USER, SSH_PASSWORD, and SSH_PORT on the server.
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>Zabbix Agent Configuration</h3>
+
             <div className="form-group">
-              <label htmlFor="sshPort">SSH Port</label>
+              <label htmlFor="version">Agent Version</label>
+              <select
+                id="version"
+                name="version"
+                value={formData.version}
+                onChange={handleChange}
+                required
+              >
+                {availableVersions.map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="serverIP">Zabbix Server IP/Hostname *</label>
+              <input
+                type="text"
+                id="serverIP"
+                name="serverIP"
+                value={formData.serverIP}
+                onChange={handleChange}
+                placeholder="192.168.1.100 or zabbix.example.com"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="serverPort">Server Port</label>
               <input
                 type="number"
-                id="sshPort"
-                name="sshPort"
-                value={formData.sshPort}
+                id="serverPort"
+                name="serverPort"
+                value={formData.serverPort}
                 onChange={handleChange}
                 min="1"
                 max="65535"
@@ -143,105 +172,33 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
             </div>
 
             <div className="form-group">
-              <label htmlFor="sshUser">SSH Username *</label>
+              <label htmlFor="listenerPort">Listener Port</label>
               <input
-                type="text"
-                id="sshUser"
-                name="sshUser"
-                value={formData.sshUser}
+                type="number"
+                id="listenerPort"
+                name="listenerPort"
+                value={formData.listenerPort}
                 onChange={handleChange}
-                placeholder="root or username with sudo access"
+                min="1"
+                max="65535"
                 required
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="sshPassword">SSH Password *</label>
-              <input
-                type="password"
-                id="sshPassword"
-                name="sshPassword"
-                value={formData.sshPassword}
-                onChange={handleChange}
-                placeholder="SSH password"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="form-section">
-            <h3>Zabbix Agent Configuration</h3>
-            
-            <div className="form-group">
-              <label htmlFor="version">Agent Version</label>
-            <select
-              id="version"
-              name="version"
-              value={formData.version}
-              onChange={handleChange}
-              required
-            >
-              {availableVersions.map(v => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="serverIP">Zabbix Server IP/Hostname *</label>
-            <input
-              type="text"
-              id="serverIP"
-              name="serverIP"
-              value={formData.serverIP}
-              onChange={handleChange}
-              placeholder="192.168.1.100 or zabbix.example.com"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="serverPort">Server Port</label>
-            <input
-              type="number"
-              id="serverPort"
-              name="serverPort"
-              value={formData.serverPort}
-              onChange={handleChange}
-              min="1"
-              max="65535"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="listenerPort">Listener Port</label>
-            <input
-              type="number"
-              id="listenerPort"
-              name="listenerPort"
-              value={formData.listenerPort}
-              onChange={handleChange}
-              min="1"
-              max="65535"
-              required
-            />
-          </div>
-
-          {!isBatchMode && (
-            <div className="form-group">
-              <label htmlFor="hostname">Agent Hostname (for Zabbix)</label>
-              <input
-                type="text"
-                id="hostname"
-                name="hostname"
-                value={formData.hostname}
-                onChange={handleChange}
-                placeholder="Hostname as it appears in Zabbix"
-                required
-              />
-            </div>
-          )}
+            {!isBatchMode && (
+              <div className="form-group">
+                <label htmlFor="hostname">Agent Hostname (for Zabbix)</label>
+                <input
+                  type="text"
+                  id="hostname"
+                  name="hostname"
+                  value={formData.hostname}
+                  onChange={handleChange}
+                  placeholder="Hostname as it appears in Zabbix"
+                  required
+                />
+              </div>
+            )}
           </div>
 
           <div className="form-group checkbox-group">
@@ -299,8 +256,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               <strong>⚠️ Requirements:</strong>
               <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                 <li>RHEL 8+ operating system</li>
-                <li>SSH access (port 22 or custom)</li>
-                <li>User with sudo privileges</li>
+                <li>Passwordless sudo for SSH_USER configured in backend .env</li>
                 <li>Internet access to repo.zabbix.com</li>
               </ul>
             </div>
@@ -311,8 +267,8 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               Cancel
             </button>
             <button type="submit" className="btn-install" disabled={installing}>
-              {installing 
-                ? (isInstallUpdateAction ? 'Processing...' : (isUpdateAction ? 'Updating...' : 'Installing...')) 
+              {installing
+                ? (isInstallUpdateAction ? 'Processing...' : (isUpdateAction ? 'Updating...' : 'Installing...'))
                 : (isBatchMode
                   ? `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Selected Hosts (${selectedHosts.length})`
                   : `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Agent`)}
@@ -325,9 +281,3 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
 };
 
 export default LocalInstallModal;
-  <div style={{ marginTop: '10px', padding: '10px', background: '#f0f7ff', borderRadius: '4px', fontSize: '0.9em' }}>
-              <strong>⚠️ Prerequisite:</strong> Passwordless sudo must be configured on the server.
-              <br />
-              See setup instructions in server documentation.
-            </div>
-          
