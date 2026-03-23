@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 import { exec } from 'child_process';
@@ -15,6 +15,8 @@ import multer from 'multer';
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ENV_PATH = process.env.SERVER_ENV_FILE || path.resolve(__dirname, '../.env');
+dotenv.config({ path: ENV_PATH });
 const DEFAULT_SSH_USER = process.env.SSH_USER || '';
 const DEFAULT_SSH_PASSWORD = process.env.SSH_PASSWORD || '';
 const DEFAULT_SSH_PORT = Number(process.env.SSH_PORT || 22);
@@ -1436,6 +1438,8 @@ app.listen(PORT, async () => {
   
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`🐧 Platform: RHEL-based Linux`);  
+  console.log(`🔐 SSH env source: ${ENV_PATH}`);
+  console.log(`🔐 SSH user configured: ${DEFAULT_SSH_USER ? 'yes' : 'no'}`);
   console.log(`📁 Logs directory: ${LOGS_DIR}`);
   console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
   console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
