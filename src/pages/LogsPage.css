@@ -50,9 +50,9 @@
 .logs-page .refresh-btn,
 .logs-page .view-btn {
   padding: 6px 14px;
-  background: #1d4ed8;
+  background: #0a466a;
   color: #ffffff;
-  border: 1px solid #1d4ed8;
+  border: 1px solid #0a466a;
   border-radius: 5px;
   cursor: pointer;
   font-size: 12px;
@@ -65,8 +65,8 @@
 
 .logs-page .refresh-btn:hover:not(:disabled),
 .logs-page .view-btn:hover {
-  background: #1e40af;
-  border-color: #1e40af;
+  background: #083650;
+  border-color: #083650;
 }
 
 .logs-page .refresh-btn:disabled {
@@ -196,8 +196,8 @@
 .logs-page .filter-date:focus,
 .logs-page .filter-search:focus {
   outline: none;
-  border-color: #1d4ed8;
-  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.08);
+  border-color: #0a466a;
+  box-shadow: 0 0 0 3px rgba(10, 70, 106, 0.14);
 }
 
 .logs-page .filter-buttons {
@@ -227,9 +227,9 @@
 }
 
 .logs-page .filter-btn.active {
-  background: #1d4ed8;
+  background: #0a466a;
   color: #ffffff;
-  border-color: #1d4ed8;
+  border-color: #0a466a;
 }
 
 .logs-page .logs-loading,
@@ -284,7 +284,7 @@
   display: inline-block;
   vertical-align: middle;
   margin-left: 4px;
-  color: #1d4ed8;
+  color: #0a466a;
 }
 
 .logs-page .logs-table td {

@@ -75,16 +75,16 @@
 .field input:focus,
 .field select:focus {
   outline: none;
-  border-color: #1d4ed8;
-  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.08);
+  border-color: #0a466a;
+  box-shadow: 0 0 0 3px rgba(10, 70, 106, 0.12);
 }
 
 .connect-btn {
   height: 34px;
-  border: 1px solid #1d4ed8;
+  border: 1px solid #0a466a;
   border-radius: 5px;
   padding: 0 14px;
-  background: #1d4ed8;
+  background: #0a466a;
   color: #ffffff;
   font-weight: 600;
   font-size: 12px;
@@ -95,8 +95,8 @@
 }
 
 .connect-btn:hover:not(:disabled) {
-  background: #1e40af;
-  border-color: #1e40af;
+  background: #083650;
+  border-color: #083650;
 }
 
 .connect-btn:disabled {
@@ -165,13 +165,18 @@
 }
 
 .upload-hosts-actions button {
-  border: 1px solid #d0d6df;
-  background: #ffffff;
-  color: #4b5563;
+  border: 1px solid #0a466a;
+  background: #0a466a;
+  color: #ffffff;
   border-radius: 4px;
   padding: 3px 6px;
   font-size: 11px;
   cursor: pointer;
+}
+
+.upload-hosts-actions button:hover {
+  background: #083650;
+  border-color: #083650;
 }
 
 .upload-host-list {
@@ -202,8 +207,8 @@
 }
 
 .upload-btn {
-  border: 1px solid #1d4ed8;
-  background: #1d4ed8;
+  border: 1px solid #0a466a;
+  background: #0a466a;
   color: #ffffff;
   border-radius: 6px;
   padding: 8px 10px;
@@ -217,8 +222,8 @@
 }
 
 .upload-btn:hover:not(:disabled) {
-  background: #1e40af;
-  border-color: #1e40af;
+  background: #083650;
+  border-color: #083650;
 }
 
 .upload-btn:disabled {
@@ -275,9 +280,9 @@
 
 .toolbar-actions button,
 .save-btn {
-  border: 1px solid #d0d6df;
-  background: #ffffff;
-  color: #4b5563;
+  border: 1px solid #0a466a;
+  background: #0a466a;
+  color: #ffffff;
   border-radius: 5px;
   padding: 5px 8px;
   font-size: 11px;
@@ -290,7 +295,8 @@
 
 .toolbar-actions button:hover,
 .save-btn:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: #083650;
+  border-color: #083650;
 }
 
 .save-btn:disabled {

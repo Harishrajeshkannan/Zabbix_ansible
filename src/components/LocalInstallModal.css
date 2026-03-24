@@ -239,14 +239,14 @@
 }
 
 .btn-install {
-  background: #1d4ed8;
+  background: #0a466a;
   color: #ffffff;
-  border-color: #1d4ed8;
+  border-color: #0a466a;
 }
 
 .btn-install:hover:not(:disabled) {
-  background: #1e40af;
-  border-color: #1e40af;
+  background: #083650;
+  border-color: #083650;
 }
 
 .btn-cancel:disabled,

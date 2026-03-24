@@ -195,23 +195,25 @@
 }
 
 .action-install {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: #0a466a;
+  border-color: #0a466a;
+  color: #ffffff;
 }
 
 .action-install:hover {
-  background: #dbeafe;
+  background: #083650;
+  border-color: #083650;
 }
 
 .action-update {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #b45309;
+  background: #0a466a;
+  border-color: #0a466a;
+  color: #ffffff;
 }
 
 .action-update:hover {
-  background: #fef3c7;
+  background: #083650;
+  border-color: #083650;
 }
 
 .action-files {

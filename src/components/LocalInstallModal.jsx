@@ -118,12 +118,6 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
                 />
               </div>
             )}
-
-            <div style={{ marginTop: '10px', padding: '10px', background: '#f0f7ff', borderRadius: '4px', fontSize: '0.9em' }}>
-              <strong>SSH credentials are loaded from backend .env</strong>
-              <br />
-              Configure SSH_USER, SSH_PASSWORD, and SSH_PORT on the server.
-            </div>
           </div>
 
           <div className="form-section">
@@ -241,26 +235,6 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               </div>
             </>
           )}
-
-          <div className="form-info">
-            <strong>{isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Installation')} Process:</strong>
-            <ul>
-              <li>Connect to remote server via SSH</li>
-              <li>Download Zabbix Agent RPM package</li>
-              <li>{isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} zabbix-agent2 via DNF</li>
-              <li>Configure agent with server details</li>
-              <li>Enable and start zabbix-agent2 service</li>
-              <li>Retrieve {isInstallUpdateAction ? 'operation' : (isUpdateAction ? 'update' : 'installation')} logs</li>
-            </ul>
-            <div style={{ marginTop: '10px', padding: '10px', background: '#fff3cd', borderRadius: '4px', fontSize: '0.9em' }}>
-              <strong>⚠️ Requirements:</strong>
-              <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
-                <li>RHEL 8+ operating system</li>
-                <li>Passwordless sudo for SSH_USER configured in backend .env</li>
-                <li>Internet access to repo.zabbix.com</li>
-              </ul>
-            </div>
-          </div>
 
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose} disabled={installing}>
