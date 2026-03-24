@@ -3,19 +3,12 @@ import { Home, FileText, FolderOpen } from 'lucide-react';
 import './Header.css';
 
 const Header = ({ onRefresh, loading, lastUpdated, onNavigate, currentView }) => {
-  const logoSrc = `${import.meta.env.BASE_URL}zabbix.png`;
-
   return (
     <header className="header">
       <div className="header-content">
         <div className="header-left">
-          <img 
-            src={logoSrc}
-            alt="Zabbix Logo" 
-            className="header-logo"
-          />
           <div className="header-titles">
-            <h1 className="header-title">Zabbix Agent Management Portal</h1>
+            <h1 className="header-title">Zabbix Agent Management</h1>
           </div>
         </div>
         <div className="header-right">
