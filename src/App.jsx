@@ -12,7 +12,7 @@ import LocalInstallModal from './components/LocalInstallModal';
 import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
-import { logAgentAction, downloadAgentPackage, installRemoteAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -50,6 +50,7 @@ function App() {
   const [selectedHostIds, setSelectedHostIds] = useState([]);
   const [batchHosts, setBatchHosts] = useState([]);
   const [preferredFileHost, setPreferredFileHost] = useState(null);
+  const [restartInProgress, setRestartInProgress] = useState(false);
 
   // Load data from Zabbix API
   const loadData = useCallback(async () => {
@@ -251,6 +252,53 @@ function App() {
     setSelectedHost(targets[0]);
     setActionType('install-update');
     setLocalInstallModalOpen(true);
+  };
+
+  const handleRestartSelected = async () => {
+    const targets = selectedHosts.filter((host) => canHostBeActioned(host));
+
+    if (targets.length < 1) {
+      toast.error('No eligible hosts selected for restart.');
+      return;
+    }
+
+    setRestartInProgress(true);
+    const toastId = toast.loading(`Restarting agent on 1/${targets.length}: ${targets[0].hostname}`);
+    const failures = [];
+    let successCount = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+
+      toast.loading(`Restarting agent on ${i + 1}/${targets.length}: ${target.hostname}`, { id: toastId });
+
+      try {
+        await restartRemoteAgent({
+          host: resolvePreferredSSHHost(target),
+          hostname: target.hostname,
+        });
+        successCount += 1;
+      } catch (error) {
+        failures.push({ hostname: target.hostname, message: error.message });
+      }
+    }
+
+    if (failures.length === 0) {
+      toast.success(`Agent restart completed on ${successCount}/${targets.length} hosts`, { id: toastId });
+    } else {
+      const failureSummary = failures
+        .slice(0, 3)
+        .map((item) => `${item.hostname}: ${item.message}`)
+        .join(' | ');
+
+      toast.error(
+        `Restart finished with failures (${successCount}/${targets.length} successful)`,
+        { id: toastId, description: failureSummary }
+      );
+    }
+
+    setRestartInProgress(false);
+    await loadData();
   };
 
   const handleCloseInstallModal = () => {
@@ -517,6 +565,8 @@ function App() {
               onToggleHostSelection={handleToggleHostSelection}
               onToggleSelectAllVisible={handleToggleSelectAllVisible}
               allVisibleSelected={allVisibleSelected}
+              onRestartSelected={handleRestartSelected}
+              restartInProgress={restartInProgress}
             />
             {selectedHostIds.length > 1 && (
               <div className="batch-actions-bar">

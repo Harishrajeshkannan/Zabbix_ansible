@@ -170,6 +170,43 @@ export const installRemoteAgent = async (installData) => {
 };
 
 /**
+ * Restart Zabbix agent service on a remote host via SSH
+ * @param {Object} payload - SSH payload (host, optional sshUser/sshPassword/sshPort)
+ * @returns {Promise<Object>} Response from backend
+ */
+export const restartRemoteAgent = async (payload) => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+
+    const response = await fetch(`${BACKEND_API_URL}/restart-agent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to restart remote agent:', error);
+    if (error.name === 'AbortError') {
+      throw new Error('Restart timeout - The restart command took too long.');
+    }
+    throw error;
+  }
+};
+
+/**
  * List directory entries under /etc/zabbix on remote server
  * @param {Object} payload - SSH context and relative path
  */
@@ -334,6 +371,7 @@ export default {
   fetchAgentVersions,
   downloadAgentPackage,
   installRemoteAgent,
+  restartRemoteAgent,
   listRemoteFiles,
   readRemoteFile,
   writeRemoteFile,

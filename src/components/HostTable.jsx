@@ -9,7 +9,9 @@ const HostTable = ({
   selectedHostIds = [],
   onToggleHostSelection,
   onToggleSelectAllVisible,
-  allVisibleSelected = false
+  allVisibleSelected = false,
+  onRestartSelected,
+  restartInProgress = false
 }) => {
   const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated' || host.status === 'Up to Date';
 
@@ -147,6 +149,23 @@ const HostTable = ({
           )}
         </tbody>
       </table>
+      {selectedHostIds.length > 0 && onRestartSelected && (
+        <div className="table-footer-actions">
+          <span className="table-footer-selection-count">
+            {selectedHostIds.length} host{selectedHostIds.length > 1 ? 's' : ''} selected
+          </span>
+          <button
+            type="button"
+            className="action-btn action-restart"
+            onClick={onRestartSelected}
+            disabled={restartInProgress}
+          >
+            {restartInProgress
+              ? 'Restarting...'
+              : `Restart Agent on Selected (${selectedHostIds.length})`}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

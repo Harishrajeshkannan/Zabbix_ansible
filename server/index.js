@@ -856,6 +856,92 @@ app.post('/api/install-remote', async (req, res) => {
   }
 });
 
+/**
+ * Restart Zabbix agent service on a remote host via SSH
+ */
+app.post('/api/restart-agent', async (req, res) => {
+  let connection = null;
+
+  try {
+    const sshConfig = resolveSSHConnection(req.body || {});
+    const targetLabel = String(req.body?.hostname || sshConfig.host).trim() || sshConfig.host;
+
+    console.log(`[SSH-RESTART] Restart requested for ${targetLabel} (${sshConfig.host}:${sshConfig.port})`);
+
+    try {
+      connection = await connectSSH(sshConfig);
+      console.log(`[SSH-RESTART] Connected to ${sshConfig.host}`);
+    } catch (sshErr) {
+      return res.status(503).json({
+        success: false,
+        error: 'SSH connection failed',
+        details: `Cannot connect to ${sshConfig.host}:${sshConfig.port} - ${sshErr.message}`
+      });
+    }
+
+    const restartCommand = [
+      "if sudo -n systemctl list-unit-files | grep -q '^zabbix-agent2\\.service'; then",
+      '  sudo -n systemctl restart zabbix-agent2 && sudo -n systemctl is-active zabbix-agent2',
+      "elif sudo -n systemctl list-unit-files | grep -q '^zabbix-agent\\.service'; then",
+      '  sudo -n systemctl restart zabbix-agent && sudo -n systemctl is-active zabbix-agent',
+      'else',
+      "  echo '__NO_ZABBIX_SERVICE__'",
+      '  exit 4',
+      'fi'
+    ].join(' ');
+
+    const result = await executeSSHCommand(connection, restartCommand);
+    const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
+
+    if (combinedOutput.includes('__NO_ZABBIX_SERVICE__')) {
+      return res.status(404).json({
+        success: false,
+        error: 'Zabbix service not found',
+        details: 'Neither zabbix-agent2.service nor zabbix-agent.service exists on the target host.'
+      });
+    }
+
+    if (
+      combinedOutput.toLowerCase().includes('not allowed to execute') ||
+      combinedOutput.toLowerCase().includes('a password is required') ||
+      combinedOutput.toLowerCase().includes('password is required') ||
+      combinedOutput.toLowerCase().includes('permission denied')
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: 'Sudo policy blocked restart',
+        details: 'The SSH user needs passwordless sudo permission to restart zabbix agent services.'
+      });
+    }
+
+    if (result.success && combinedOutput.toLowerCase().includes('active')) {
+      return res.json({
+        success: true,
+        message: `Zabbix agent restarted successfully on ${targetLabel}`,
+        host: sshConfig.host,
+        output: combinedOutput
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Restart failed',
+      details: combinedOutput || 'Unknown error while restarting agent service.'
+    });
+  } catch (error) {
+    console.error('[SSH-RESTART] Failed:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Restart failed',
+      details: error.message
+    });
+  } finally {
+    if (connection) {
+      connection.end();
+    }
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
