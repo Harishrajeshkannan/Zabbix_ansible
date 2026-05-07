@@ -96,6 +96,11 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
     console.log(`[ANSIBLE] Using password-based authentication for user: ${sshUser}`);
   }
   
+  // For password-based auth with sshpass, add -k flag to prompt for password
+  if (sshPassword && !sshKeyFile) {
+    cmd += ` -k`;
+  }
+
   console.log(`[ANSIBLE] Running: ${cmd}`);
   
   const envVars = {
