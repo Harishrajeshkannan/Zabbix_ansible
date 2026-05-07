@@ -91,6 +91,11 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   // Build ansible-playbook command with SSH credentials
   let cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
 
+  // Add -k flag if using password auth so Ansible prompts for password (sshpass intercepts)
+  if (sshPassword && !sshKeyFile) {
+    cmd += ` -k`;
+  }
+
   if (sshKeyFile) {
     console.log(`[ANSIBLE] Using key-based authentication for user ${sshUser}`);
   } else if (sshPassword) {
