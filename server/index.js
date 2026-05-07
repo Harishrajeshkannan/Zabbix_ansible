@@ -102,7 +102,8 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   
   const envVars = {
     ...process.env,
-    ANSIBLE_CONFIG: ansibleConfigPath
+    ANSIBLE_CONFIG: ansibleConfigPath,
+    ANSIBLE_ROLES_PATH: path.join(ansibleRoot, 'roles')
   };
   
   const result = await executeShellCommand(cmd, {
