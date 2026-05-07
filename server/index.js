@@ -72,10 +72,17 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   const playbookVars = { ...(extraVars || {}) };
   
   // Read SSH credentials from environment variables
-  const sshUser = process.env.ANSIBLE_SSH_USER || 'root';
+  const sshUser = (process.env.ANSIBLE_SSH_USER || '').trim();
   const sshPassword = process.env.ANSIBLE_SSH_PASSWORD || '';
-  const sshPort = process.env.ANSIBLE_SSH_PORT || '22';
-  const sshKeyFile = process.env.ANSIBLE_SSH_PRIVATE_KEY_FILE || '';
+  const sshPort = (process.env.ANSIBLE_SSH_PORT || '22').trim();
+  const sshKeyFile = (process.env.ANSIBLE_SSH_PRIVATE_KEY_FILE || '').trim();
+
+  if (!sshUser) {
+    throw new Error('ANSIBLE_SSH_USER is not set in the backend environment');
+  }
+  if (!sshKeyFile && !sshPassword) {
+    throw new Error('Set ANSIBLE_SSH_PASSWORD or ANSIBLE_SSH_PRIVATE_KEY_FILE in the backend environment');
+  }
 
   // Pass connection values as Ansible variables so non-interactive auth works reliably.
   playbookVars.ansible_user = sshUser;
