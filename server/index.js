@@ -63,23 +63,56 @@ async function executeShellCommand(command, options = {}) {
 /**
  * Run an Ansible playbook against a single target host.
  * Uses a one-host inline inventory so the controller runs the tasks on `host`.
+ * SSH credentials are read from environment variables for authentication.
  */
 async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   const ansibleRoot = path.resolve(__dirname, '../ansible');
   const ansibleConfigPath = path.join(ansibleRoot, 'ansible.cfg');
   const inventory = `${host},`;
   const extraVarsJson = JSON.stringify(extraVars || {});
-  const cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
-
+  
+  // Read SSH credentials from environment variables
+  const sshUser = process.env.ANSIBLE_SSH_USER || 'root';
+  const sshPassword = process.env.ANSIBLE_SSH_PASSWORD || '';
+  const sshPort = process.env.ANSIBLE_SSH_PORT || '22';
+  const sshKeyFile = process.env.ANSIBLE_SSH_PRIVATE_KEY_FILE || '';
+  
+  // Build ansible-playbook command with SSH credentials
+  let cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
+  
+  // Add SSH user
+  cmd += ` --user ${shellQuote(sshUser)}`;
+  
+  // Add SSH port
+  cmd += ` -e ansible_port=${shellQuote(sshPort)}`;
+  
+  // Add key-based or password-based authentication
+  if (sshKeyFile) {
+    // Key-based authentication
+    cmd += ` --private-key ${shellQuote(sshKeyFile)}`;
+    console.log(`[ANSIBLE] Using key-based authentication: ${sshKeyFile}`);
+  } else if (sshPassword) {
+    // Password-based authentication via environment variable
+    console.log(`[ANSIBLE] Using password-based authentication for user: ${sshUser}`);
+  }
+  
   console.log(`[ANSIBLE] Running: ${cmd}`);
+  
+  const envVars = {
+    ...process.env,
+    ANSIBLE_CONFIG: ansibleConfigPath
+  };
+  
+  // For password-based auth, pass ANSIBLE_PASSWORD environment variable
+  if (sshPassword && !sshKeyFile) {
+    envVars.ANSIBLE_PASSWORD = sshPassword;
+  }
+  
   const result = await executeShellCommand(cmd, {
     timeout: 10 * 60 * 1000,
     maxBuffer: 10 * 1024 * 1024,
     cwd: ansibleRoot,
-    env: {
-      ...process.env,
-      ANSIBLE_CONFIG: ansibleConfigPath
-    }
+    env: envVars
   });
   return result;
 }
