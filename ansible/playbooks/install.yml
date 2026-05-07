@@ -1,0 +1,7 @@
+- name: Install Zabbix Agent 2
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: zabbix_agent

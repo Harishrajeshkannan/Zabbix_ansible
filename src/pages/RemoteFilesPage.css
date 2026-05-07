@@ -19,7 +19,7 @@
   font-size: 12px;
 }
 
-.ssh-panel {
+.remote-panel {
   background: #ffffff;
   border: 1px solid #e2e6ed;
   border-radius: 8px;
@@ -404,7 +404,7 @@
     gap: 16px;
   }
 
-  .ssh-panel {
+  .remote-panel {
     grid-template-columns: 1fr;
   }
 }

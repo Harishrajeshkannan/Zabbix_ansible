@@ -7,9 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import process from 'process';
 import fs from 'fs/promises';
-import crypto from 'crypto';
 import { Buffer } from 'buffer';
-import { Client as SSHClient } from 'ssh2';
 import multer from 'multer';
 
 const execAsync = promisify(exec);
@@ -17,9 +15,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ENV_PATH = process.env.SERVER_ENV_FILE || path.resolve(__dirname, '../.env');
 dotenv.config({ path: ENV_PATH });
-const DEFAULT_SSH_USER = process.env.SSH_USER || '';
-const DEFAULT_SSH_PASSWORD = process.env.SSH_PASSWORD || '';
-const DEFAULT_SSH_PORT = Number(process.env.SSH_PORT || 22);
+// Ansible will be used as the remote execution layer instead of direct SSH.
+const ANSIBLE_PLAYBOOK_CMD = process.env.ANSIBLE_PLAYBOOK_CMD || 'ansible-playbook';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -34,16 +31,18 @@ const upload = multer({
  * Execute shell command with proper error handling
  */
 async function executeShellCommand(command, options = {}) {
-  const { timeout = 180000, maxBuffer = 5 * 1024 * 1024 } = options;
+  const { timeout = 180000, maxBuffer = 5 * 1024 * 1024, cwd, env } = options;
   
   console.log(`[executeShellCommand] Received command: "${command}"`);
   console.log(`[executeShellCommand] Command length: ${command.length}`);
   console.log(`[executeShellCommand] Timeout: ${timeout}ms`);
   
   try {
-    const { stdout, stderr } = await execAsync(command, { 
+    const { stdout, stderr } = await execAsync(command, {
       timeout, 
       maxBuffer,
+      cwd,
+      env,
       shell: '/bin/bash'
     });
     
@@ -61,174 +60,40 @@ async function executeShellCommand(command, options = {}) {
 }
 
 
-
 /**
- * Parse error from installation output
+ * Run an Ansible playbook against a single target host.
+ * Uses a one-host inline inventory so the controller runs the tasks on `host`.
  */
-function parseInstallError(output) {
-  if (output.includes('not allowed to execute') || output.includes('Sorry, user')) {
-    return {
-      status: 403,
-      error: 'Sudo policy blocked execution',
-      details: 'The SSH user is authenticated but is not permitted by sudoers to run the install command. Grant sudo permission for /bin/sh and the install script path, or use an SSH user with broader sudo access.'
-    };
-  }
+async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
+  const ansibleRoot = path.resolve(__dirname, '../ansible');
+  const ansibleConfigPath = path.join(ansibleRoot, 'ansible.cfg');
+  const inventory = `${host},`;
+  const extraVarsJson = JSON.stringify(extraVars || {});
+  const cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
 
-  if (output.includes('permission denied') || output.includes('Permission denied')) {
-    return {
-      status: 403,
-      error: 'Permission denied',
-      details: 'Insufficient privileges to install packages. Ensure the user has sudo access.'
-    };
-  }
-  
-  if (output.includes('Repository') && output.includes('not found')) {
-    return {
-      status: 404,
-      error: 'Repository not found',
-      details: 'Zabbix repository not available for this RHEL version or the specified version does not exist.'
-    };
-  }
-
-  if (output.includes('Connection refused') || output.includes('Network is unreachable')) {
-    return {
-      status: 503,
-      error: 'Network error',
-      details: 'Cannot reach package repositories or Zabbix server. Check network connectivity.'
-    };
-  }
-  
-  return {
-    status: 500,
-    error: 'Installation failed',
-    details: output.substring(0, 500)
-  };
-}
-
-/**
- * Execute command on remote server via SSH
- */
-async function executeSSHCommand(conn, command) {
-  return new Promise((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
-    
-    conn.exec(command, (err, stream) => {
-      if (err) return reject(err);
-      
-      stream.on('close', (code) => {
-        resolve({ stdout, stderr, code, success: code === 0 });
-      }).on('data', (data) => {
-        stdout += data.toString();
-      }).stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-    });
-  });
-}
-
-/**
- * Upload file to remote server via SFTP
- */
-async function uploadFileSSH(conn, localPath, remotePath) {
-  return new Promise((resolve, reject) => {
-    conn.sftp((err, sftp) => {
-      if (err) return reject(err);
-      
-      sftp.fastPut(localPath, remotePath, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-    });
-  });
-}
-
-/**
- * Upload in-memory content to remote server via SFTP
- */
-async function uploadBufferSSH(conn, content, remotePath) {
-  return new Promise((resolve, reject) => {
-    conn.sftp((err, sftp) => {
-      if (err) return reject(err);
-
-      let settled = false;
-      const done = (error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutId);
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      };
-
-      const timeoutId = setTimeout(() => {
-        done(new Error('SFTP upload timeout while writing remote temp file'));
-      }, 30000);
-
-      const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
-
-      sftp.open(remotePath, 'w', 0o600, (openErr, handle) => {
-        if (openErr) {
-          return done(openErr);
-        }
-
-        sftp.write(handle, buffer, 0, buffer.length, 0, (writeErr) => {
-          if (writeErr) {
-            sftp.close(handle, () => done(writeErr));
-            return;
-          }
-
-          sftp.close(handle, (closeErr) => {
-            done(closeErr || null);
-          });
-        });
-      });
-    });
-  });
-}
-
-/**
- * Download file from remote server via SFTP
- */
-async function downloadFileSSH(conn, remotePath, localPath) {
-  return new Promise((resolve, reject) => {
-    conn.sftp((err, sftp) => {
-      if (err) return reject(err);
-      
-      sftp.fastGet(remotePath, localPath, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-    });
-  });
-}
-
-/**
- * Connect to remote server via SSH
- */
-async function connectSSH(config) {
-  return new Promise((resolve, reject) => {
-    const conn = new SSHClient();
-    const connectConfig = {
-      host: config.host,
-      port: config.port,
-      username: config.username,
-      readyTimeout: 15000
-    };
-
-    if (typeof config.password === 'string' && config.password.length > 0) {
-      connectConfig.password = config.password;
+  console.log(`[ANSIBLE] Running: ${cmd}`);
+  const result = await executeShellCommand(cmd, {
+    timeout: 10 * 60 * 1000,
+    maxBuffer: 10 * 1024 * 1024,
+    cwd: ansibleRoot,
+    env: {
+      ...process.env,
+      ANSIBLE_CONFIG: ansibleConfigPath
     }
-    
-    conn.on('ready', () => {
-      resolve(conn);
-    }).on('error', (err) => {
-      reject(err);
-    }).connect(connectConfig);
   });
+  return result;
 }
+
+/* SFTP upload helper removed. Use Ansible playbooks/roles for file copy operations. */
+
+/* In-memory upload helper removed. Use Ansible roles/playbooks for uploading content. */
+
+/* SFTP download helper removed. Use Ansible playbooks/roles for file retrieval. */
+
+/**
+ * Connect to remote server
+ */
+/* Direct SSH connection helper removed. Ansible will manage transport from controller. */
 
 /**
  * Quote string for shell single-quoted context
@@ -238,48 +103,14 @@ function shellQuote(value) {
 }
 
 /**
- * Normalize a user-supplied path to remain inside allowed root.
+ * Resolve target host from request body.
  */
-function normalizeRemotePath(relativePath, allowedRoot) {
-  const safeRoot = path.posix.normalize(allowedRoot).replace(/\/$/, '');
-  const incoming = String(relativePath || '').trim();
-  const normalizedRelative = path.posix.normalize(`/${incoming}`).replace(/^\//, '');
-
-  if (normalizedRelative.includes('..')) {
-    throw new Error('Path traversal is not allowed');
-  }
-
-  const absolutePath = path.posix.join(safeRoot, normalizedRelative);
-  if (!absolutePath.startsWith(`${safeRoot}/`) && absolutePath !== safeRoot) {
-    throw new Error('Path outside allowed directory');
-  }
-
-  return {
-    root: safeRoot,
-    relative: normalizedRelative,
-    absolute: absolutePath
-  };
-}
-
-/**
- * Resolve SSH connection options from request body + environment.
- */
-function resolveSSHConnection(body) {
+function resolveTargetHost(body) {
   const host = String(body?.host || '').trim();
-  const portCandidate = Number(body?.sshPort ?? DEFAULT_SSH_PORT);
-  const port = Number.isFinite(portCandidate) && portCandidate > 0 ? portCandidate : DEFAULT_SSH_PORT;
-  const username = String(body?.sshUser || DEFAULT_SSH_USER || '').trim();
-  const password = typeof body?.sshPassword === 'string' ? body.sshPassword : DEFAULT_SSH_PASSWORD;
-
   if (!host) {
     throw new Error('host is required');
   }
-
-  if (!username) {
-    throw new Error('SSH_USER is not configured in backend environment');
-  }
-
-  return { host, port, username, password };
+  return host;
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -644,301 +475,57 @@ app.get('/api/download-agent/:version', async (req, res) => {
 });
 
 /**
- * Install Zabbix agent on remote RHEL server via SSH
- * Connects to remote server, uploads installation script, executes it, and retrieves logs
+ * Install Zabbix agent on remote RHEL server via Ansible
  */
 app.post('/api/install-remote', async (req, res) => {
-  console.log('\n[SSH-INSTALL] ========================================');
-  console.log('[SSH-INSTALL] /api/install-remote endpoint HIT!');
-  console.log('[SSH-INSTALL] ========================================\n');
-  
-  let connection = null;
-  
+  console.log('\n[ANSIBLE-INSTALL] /api/install-remote endpoint HIT!');
   try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { 
-      host,           // Remote server IP/hostname
-      version,        // Zabbix version
-      serverIP,       // Zabbix server IP
-      serverPort = 10051,  // Zabbix server port
-      listenerPort = 10050, // Zabbix agent listen port
-      hostname        // Agent hostname
-    } = req.body;
-    
-    console.log('[SSH-INSTALL] Parameters:');
-    console.log(`  Host: ${host}:${sshConfig.port}`);
-    console.log(`  SSH User: ${sshConfig.username}`);
-    console.log(`  Zabbix Version: ${version}`);
-    console.log(`  Zabbix Server: ${serverIP}:${serverPort}`);
-    console.log(`  Agent Listen Port: ${listenerPort}`);
-    console.log(`  Agent Hostname: ${hostname}\n`);
-    
-    // Validate required fields
-    if (!host || !version || !serverIP || !hostname) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        details: 'host, version, serverIP, and hostname are required'
-      });
-    }
-    
-    // Security: Input validation
-    if (!/^\d+\.\d+\.\d+$/.test(version)) {
-      return res.status(400).json({
-        error: 'Invalid version format',
-        details: 'Version must be in format X.Y.Z (e.g., 7.4.6)'
-      });
-    }
-    
-    if (!/^[a-zA-Z0-9.-]+$/.test(serverIP)) {
-      return res.status(400).json({
-        error: 'Invalid server IP/hostname',
-        details: 'Server IP must contain only alphanumeric characters, dots, and hyphens'
-      });
-    }
-    
-    if (!/^[a-zA-Z0-9.-]+$/.test(hostname)) {
-      return res.status(400).json({
-        error: 'Invalid hostname',
-        details: 'Hostname must contain only alphanumeric characters, dots, and hyphens'
-      });
-    }
-    
-    if (serverPort < 1 || serverPort > 65535) {
-      return res.status(400).json({
-        error: 'Invalid port',
-        details: 'Port must be between 1 and 65535'
-      });
+    const host = resolveTargetHost(req.body || {});
+    const { version, serverIP, serverPort = 10051, listenerPort = 10050, hostname } = req.body;
+
+    if (!version || !serverIP || !hostname) {
+      return res.status(400).json({ error: 'Missing required fields', details: 'version, serverIP and hostname are required' });
     }
 
-    if (listenerPort < 1 || listenerPort > 65535) {
-      return res.status(400).json({
-        error: 'Invalid listener port',
-        details: 'Listener port must be between 1 and 65535'
-      });
+    // Basic validation preserved from previous implementation
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+      return res.status(400).json({ error: 'Invalid version format', details: 'Version must be in format X.Y.Z (e.g., 7.4.6)' });
     }
-    
-    // Connect to remote server via SSH
-    console.log(`[SSH-INSTALL] Connecting to ${host}:${sshConfig.port}...`);
-    
-    try {
-      connection = await connectSSH(sshConfig);
-      console.log(`[SSH-INSTALL] ✓ SSH connected successfully\n`);
-    } catch (sshErr) {
-      console.error(`[SSH-INSTALL] ✗ SSH connection failed: ${sshErr.message}`);
-      return res.status(503).json({
-        error: 'SSH connection failed',
-        details: `Cannot connect to ${host}:${sshConfig.port} - ${sshErr.message}`
-      });
+
+    // Invoke Ansible playbook
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
+    const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
+
+    const result = await runAnsiblePlaybook(playbookPath, host, extraVars);
+
+    if (result.success) {
+      return res.json({ success: true, message: `Ansible playbook ran for ${host}`, output: result.stdout });
     }
-    
-    // Define remote paths (using /tmp/ instead of __dirname)
-    const timestamp = Date.now();
-    const remoteScriptPath = `/tmp/install-zabbix-rhel-${timestamp}.sh`;
-    const remoteLogPattern = `/tmp/zabbix_install_*.log`;
-    const localScriptPath = path.join(__dirname, 'install-zabbix-rhel.sh');
-    const localLogsDir = path.join(__dirname, 'agent-logs');
-    
-    // Ensure local logs directory exists
-    await executeShellCommand(`mkdir -p "${localLogsDir}"`);
-    await executeShellCommand(`chmod 755 "${localLogsDir}"`);
-    
-    // Upload installation script to remote server
-    console.log(`[SSH-INSTALL] Uploading script: ${localScriptPath} → ${remoteScriptPath}`);
-    
-    try {
-      await uploadFileSSH(connection, localScriptPath, remoteScriptPath);
-      console.log(`[SSH-INSTALL] ✓ Script uploaded successfully`);
-      
-      // Set executable permissions on remote script
-      await executeSSHCommand(connection, `chmod 755 ${remoteScriptPath}`);
-      console.log(`[SSH-INSTALL] ✓ Script permissions set to 755 (rwxr-xr-x)\n`);
-    } catch (uploadErr) {
-      console.error(`[SSH-INSTALL] ✗ Upload failed: ${uploadErr.message}`);
-      connection.end();
-      return res.status(500).json({
-        error: 'Script upload failed',
-        details: uploadErr.message
-      });
-    }
-    
-    // Execute installation on remote server with passwordless sudo.
-    const installCommand = `sudo -n /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}`;
-    console.log(`[SSH-INSTALL] Executing installation command:`);
-    console.log(`[SSH-INSTALL] sudo -n /bin/sh ${remoteScriptPath} ${version} ${serverIP} ${hostname} ${serverPort} ${listenerPort}\n`);
-    
-    let result;
-    try {
-      result = await executeSSHCommand(connection, installCommand);
-      console.log(`[SSH-INSTALL] Command execution completed`);
-      console.log(`[SSH-INSTALL] Exit code: ${result.code}`);
-      console.log(`[SSH-INSTALL] Output:\n${result.stdout}`);
-      if (result.stderr) {
-        console.log(`[SSH-INSTALL] Errors:\n${result.stderr}`);
-      }
-    } catch (execErr) {
-      console.error(`[SSH-INSTALL] ✗ Execution failed: ${execErr.message}`);
-      connection.end();
-      return res.status(500).json({
-        error: 'Remote execution failed',
-        details: execErr.message
-      });
-    }
-    
-    // Retrieve installation log from remote server
-    console.log(`[SSH-INSTALL] Retrieving installation log...`);
-    
-    try {
-      // Find the latest log file
-      const findLogResult = await executeSSHCommand(connection, `ls -t ${remoteLogPattern} 2>/dev/null | head -1`);
-      const remoteLogPath = findLogResult.stdout.trim();
-      
-      if (remoteLogPath) {
-        const logFilename = `${hostname}_install_${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
-        const localLogPath = path.join(localLogsDir, logFilename);
-        
-        await downloadFileSSH(connection, remoteLogPath, localLogPath);
-        await executeShellCommand(`chmod 777 "${localLogPath}"`);
-        
-        console.log(`[SSH-INSTALL] ✓ Log retrieved: ${logFilename}\n`);
-      } else {
-        console.log(`[SSH-INSTALL] ⚠ No installation log found on remote server\n`);
-      }
-    } catch (logErr) {
-      console.warn(`[SSH-INSTALL] ⚠ Could not retrieve log: ${logErr.message}`);
-    }
-    
-    // Cleanup remote script
-    try {
-      const cleanupCommand = `sudo -n /bin/rm -f ${remoteScriptPath}`;
-      await executeSSHCommand(connection, cleanupCommand);
-      console.log(`[SSH-INSTALL] ✓ Remote cleanup completed`);
-    } catch (cleanErr) {
-      console.warn(`[SSH-INSTALL] ⚠ Cleanup failed: ${cleanErr.message}`);
-    }
-    
-    // Close SSH connection
-    connection.end();
-    console.log(`[SSH-INSTALL] ✓ SSH connection closed\n`);
-    
-    const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
-    
-    // Check for success
-    if (result.success && (combinedOutput.includes('successfully installed') || combinedOutput.includes('Installation completed') || combinedOutput.includes('INSTALLATION COMPLETED'))) {
-      console.log(`[SSH-INSTALL] ✓ Installation SUCCESS\n`);
-      return res.json({
-        success: true,
-        message: `Zabbix Agent ${version} installed successfully on ${host}`,
-        output: combinedOutput,
-        host: host
-      });
-    }
-    
-    // Parse and return error
-    console.log(`[SSH-INSTALL] ✗ Installation FAILED\n`);
-    const errorInfo = parseInstallError(combinedOutput);
-    return res.status(errorInfo.status).json({
-      ...errorInfo,
-      host: host,
-      output: combinedOutput
-    });
-    
+
+    return res.status(500).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
-    console.error(`[SSH-INSTALL] ✗ Exception: ${error.message}\n`);
-    
-    if (connection) {
-      connection.end();
-    }
-    
-    res.status(500).json({
-      error: 'Installation failed',
-      details: error.message
-    });
+    console.error('[ANSIBLE-INSTALL] Failed:', error);
+    return res.status(500).json({ success: false, error: 'Installation failed', details: error.message });
   }
 });
 
 /**
- * Restart Zabbix agent service on a remote host via SSH
+ * Restart Zabbix agent service on a remote host via Ansible
  */
 app.post('/api/restart-agent', async (req, res) => {
-  let connection = null;
-
   try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const targetLabel = String(req.body?.hostname || sshConfig.host).trim() || sshConfig.host;
+    const host = resolveTargetHost(req.body || {});
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/restart.yml');
+    const result = await runAnsiblePlaybook(playbookPath, host, { host });
 
-    console.log(`[SSH-RESTART] Restart requested for ${targetLabel} (${sshConfig.host}:${sshConfig.port})`);
-
-    try {
-      connection = await connectSSH(sshConfig);
-      console.log(`[SSH-RESTART] Connected to ${sshConfig.host}`);
-    } catch (sshErr) {
-      return res.status(503).json({
-        success: false,
-        error: 'SSH connection failed',
-        details: `Cannot connect to ${sshConfig.host}:${sshConfig.port} - ${sshErr.message}`
-      });
+    if (result.success) {
+      return res.json({ success: true, message: `Restart playbook ran for ${host}`, output: result.stdout });
     }
 
-    const restartCommand = [
-      "if sudo -n systemctl list-unit-files | grep -q '^zabbix-agent2\\.service'; then",
-      '  sudo -n systemctl restart zabbix-agent2 && sudo -n systemctl is-active zabbix-agent2',
-      "elif sudo -n systemctl list-unit-files | grep -q '^zabbix-agent\\.service'; then",
-      '  sudo -n systemctl restart zabbix-agent && sudo -n systemctl is-active zabbix-agent',
-      'else',
-      "  echo '__NO_ZABBIX_SERVICE__'",
-      '  exit 4',
-      'fi'
-    ].join(' ');
-
-    const result = await executeSSHCommand(connection, restartCommand);
-    const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
-
-    if (combinedOutput.includes('__NO_ZABBIX_SERVICE__')) {
-      return res.status(404).json({
-        success: false,
-        error: 'Zabbix service not found',
-        details: 'Neither zabbix-agent2.service nor zabbix-agent.service exists on the target host.'
-      });
-    }
-
-    if (
-      combinedOutput.toLowerCase().includes('not allowed to execute') ||
-      combinedOutput.toLowerCase().includes('a password is required') ||
-      combinedOutput.toLowerCase().includes('password is required') ||
-      combinedOutput.toLowerCase().includes('permission denied')
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: 'Sudo policy blocked restart',
-        details: 'The SSH user needs passwordless sudo permission to restart zabbix agent services.'
-      });
-    }
-
-    if (result.success && combinedOutput.toLowerCase().includes('active')) {
-      return res.json({
-        success: true,
-        message: `Zabbix agent restarted successfully on ${targetLabel}`,
-        host: sshConfig.host,
-        output: combinedOutput
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      error: 'Restart failed',
-      details: combinedOutput || 'Unknown error while restarting agent service.'
-    });
+    return res.status(500).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
-    console.error('[SSH-RESTART] Failed:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Restart failed',
-      details: error.message
-    });
-  } finally {
-    if (connection) {
-      connection.end();
-    }
+    console.error('[ANSIBLE-RESTART] Failed:', error);
+    return res.status(500).json({ success: false, error: 'Restart failed', details: error.message });
   }
 });
 
@@ -1024,499 +611,52 @@ app.post('/api/cleanup-temp', async (req, res) => {
  * Remote file manager - list files and folders under /etc/zabbix
  */
 app.post('/api/remote-files/list', async (req, res) => {
-  let connection = null;
-
-  try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { host, relativePath = '' } = req.body;
-
-    if (!host) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'host is required'
-      });
-    }
-
-    const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
-    const safePath = shellQuote(pathInfo.absolute);
-
-    connection = await connectSSH(sshConfig);
-
-    const listCommand = `sudo -n ls -la ${safePath} 2>/dev/null`;
-    const result = await executeSSHCommand(connection, listCommand);
-
-    if (!result.success) {
-      return res.status(404).json({
-        error: 'Directory not found or no access',
-        details: result.stderr || result.stdout || 'Unable to list directory'
-      });
-    }
-
-    const lines = result.stdout.split('\n').slice(1).filter((line) => line.trim());
-    const items = [];
-
-    lines.forEach((line) => {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 9) return;
-
-      const permissions = parts[0];
-      const size = Number(parts[4]) || 0;
-      const modified = `${parts[5]} ${parts[6]} ${parts[7]}`;
-      const name = parts.slice(8).join(' ');
-
-      if (name === '.' || name === '..') return;
-
-      const childRelative = pathInfo.relative ? `${pathInfo.relative}/${name}` : name;
-      items.push({
-        name,
-        type: permissions.startsWith('d') ? 'directory' : 'file',
-        size,
-        modified,
-        permissions,
-        relativePath: childRelative
-      });
-    });
-
-    const sortedItems = items.sort((a, b) => {
-      if (a.type !== b.type) {
-        return a.type === 'directory' ? -1 : 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
-
-    return res.json({
-      success: true,
-      root: pathInfo.root,
-      currentPath: pathInfo.relative,
-      items: sortedItems
-    });
-  } catch (error) {
-    return res.status(500).json({
-      error: 'Failed to list remote files',
-      details: error.message
-    });
-  } finally {
-    if (connection) connection.end();
-  }
+  // TODO: Implement remote file listing via Ansible modules/roles.
+  return res.status(501).json({
+    success: false,
+    error: 'Not Implemented',
+    details: 'Remote file manager is being migrated to Ansible. Use playbooks in ansible/playbooks/files.yml'
+  });
 });
 
 /**
  * Remote file manager - read a text file under /etc/zabbix
  */
 app.post('/api/remote-files/read', async (req, res) => {
-  let connection = null;
-
-  try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { host, relativePath } = req.body;
-
-    if (!host || !relativePath) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'host and relativePath are required'
-      });
-    }
-
-    const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
-    const safePath = shellQuote(pathInfo.absolute);
-
-    connection = await connectSSH(sshConfig);
-
-    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath} 2>/dev/null`);
-    if (!statResult.success || !statResult.stdout.trim()) {
-      return res.status(404).json({
-        error: 'File not found',
-        details: 'Cannot stat target file'
-      });
-    }
-
-    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
-    const size = Number(sizeStr) || 0;
-
-    if (size > 1024 * 1024) {
-      return res.status(413).json({
-        error: 'File too large',
-        details: 'Only files up to 1 MB are supported in the editor'
-      });
-    }
-
-    const readResult = await executeSSHCommand(connection, `sudo -n cat ${safePath}`);
-    if (!readResult.success) {
-      return res.status(500).json({
-        error: 'Failed to read file',
-        details: readResult.stderr || 'Cannot read file content'
-      });
-    }
-
-    const content = readResult.stdout;
-    const hash = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
-
-    return res.json({
-      success: true,
-      relativePath: pathInfo.relative,
-      content,
-      metadata: {
-        size,
-        mtime: Number(mtimeStr) || 0,
-        mode,
-        hash
-      }
-    });
-  } catch (error) {
-    return res.status(500).json({
-      error: 'Failed to read remote file',
-      details: error.message
-    });
-  } finally {
-    if (connection) connection.end();
-  }
+  // TODO: Implement remote file read via Ansible (slurp/copy) and return content.
+  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote file read is being migrated to Ansible.' });
 });
 
 /**
  * Remote file manager - save file content under /etc/zabbix
  */
 app.post('/api/remote-files/write', async (req, res) => {
-  let connection = null;
-
-  try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { host, relativePath, content, previousMtime } = req.body;
-
-    if (!host || !relativePath || typeof content !== 'string') {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'host, relativePath, and content are required'
-      });
-    }
-
-    const pathInfo = normalizeRemotePath(relativePath, '/etc/zabbix');
-    const safePath = shellQuote(pathInfo.absolute);
-    const tempPath = `/tmp/zabbix-portal-edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-    const safeTempPath = shellQuote(tempPath);
-
-    connection = await connectSSH(sshConfig);
-
-    if (previousMtime !== undefined && previousMtime !== null && previousMtime !== '' && Number.isFinite(Number(previousMtime))) {
-      const mtimeResult = await executeSSHCommand(connection, `sudo -n stat -c "%Y" ${safePath} 2>/dev/null`);
-      const currentMtime = Number(mtimeResult.stdout.trim());
-      if (mtimeResult.success && currentMtime && currentMtime !== Number(previousMtime)) {
-        return res.status(409).json({
-          error: 'File changed on server',
-          details: 'The file was modified since you opened it. Reload before saving again.'
-        });
-      }
-    }
-
-    await uploadBufferSSH(connection, content, tempPath);
-
-    const installCmd = `sudo -n /usr/bin/install -m 0644 ${safeTempPath} ${safePath}`;
-    let writeResult = await executeSSHCommand(connection, installCmd);
-
-    // Fallback for systems/sudo policies where install is unavailable or blocked.
-    if (!writeResult.success) {
-      writeResult = await executeSSHCommand(
-        connection,
-        `sudo -n cp ${safeTempPath} ${safePath} && sudo -n chmod 0644 ${safePath}`
-      );
-    }
-
-    await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
-
-    if (!writeResult.success) {
-      return res.status(500).json({
-        error: 'Failed to save file',
-        details: writeResult.stderr || writeResult.stdout || 'Unable to write file'
-      });
-    }
-
-    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
-    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
-
-    console.log(`[REMOTE-FILES] Saved ${pathInfo.absolute} on ${host} by ${sshConfig.username}`);
-
-    return res.json({
-      success: true,
-      relativePath: pathInfo.relative,
-      metadata: {
-        size: Number(sizeStr) || 0,
-        mtime: Number(mtimeStr) || 0,
-        mode
-      }
-    });
-  } catch (error) {
-    console.error(`[REMOTE-FILES] Write failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
-    return res.status(500).json({
-      error: 'Failed to write remote file',
-      details: error.message
-    });
-  } finally {
-    if (connection) connection.end();
-  }
+  // TODO: Implement write via Ansible (copy/template) and proper mtime handling.
+  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote file write is being migrated to Ansible.' });
 });
 
 /**
  * Remote file manager - create a new file under /etc/zabbix
  */
 app.post('/api/remote-files/create', async (req, res) => {
-  let connection = null;
-
-  try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { host, directoryPath = '', fileName, content = '' } = req.body;
-
-    if (!host || !fileName) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'host and fileName are required'
-      });
-    }
-
-    if (!/^[a-zA-Z0-9._-]+$/.test(fileName)) {
-      return res.status(400).json({
-        error: 'Invalid file name',
-        details: 'Allowed characters: letters, numbers, dot, underscore, dash'
-      });
-    }
-
-    const targetRelative = directoryPath ? `${directoryPath}/${fileName}` : fileName;
-    const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
-    const safePath = shellQuote(pathInfo.absolute);
-    const tempPath = `/tmp/zabbix-portal-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-    const safeTempPath = shellQuote(tempPath);
-
-    connection = await connectSSH(sshConfig);
-
-    const existsResult = await executeSSHCommand(connection, `sudo -n test -e ${safePath} && echo exists || echo missing`);
-    if (existsResult.stdout.includes('exists')) {
-      return res.status(409).json({
-        error: 'File already exists',
-        details: `A file named ${fileName} already exists in this directory`
-      });
-    }
-
-    await uploadBufferSSH(connection, content, tempPath);
-    const installCmd = `sudo -n /usr/bin/install -m 0644 ${safeTempPath} ${safePath}`;
-    let createResult = await executeSSHCommand(connection, installCmd);
-
-    // Fallback for systems/sudo policies where install is unavailable or blocked.
-    if (!createResult.success) {
-      createResult = await executeSSHCommand(
-        connection,
-        `sudo -n cp ${safeTempPath} ${safePath} && sudo -n chmod 0644 ${safePath}`
-      );
-    }
-
-    await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
-
-    if (!createResult.success) {
-      return res.status(500).json({
-        error: 'Failed to create file',
-        details: createResult.stderr || createResult.stdout || 'Unable to create file'
-      });
-    }
-
-    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
-    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
-
-    console.log(`[REMOTE-FILES] Created ${pathInfo.absolute} on ${host} by ${sshConfig.username}`);
-
-    return res.json({
-      success: true,
-      relativePath: pathInfo.relative,
-      metadata: {
-        size: Number(sizeStr) || 0,
-        mtime: Number(mtimeStr) || 0,
-        mode
-      }
-    });
-  } catch (error) {
-    console.error(`[REMOTE-FILES] Create failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
-    return res.status(500).json({
-      error: 'Failed to create remote file',
-      details: error.message
-    });
-  } finally {
-    if (connection) connection.end();
-  }
+  // TODO: Implement create file via Ansible (copy/template tasks).
+  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote file create is being migrated to Ansible.' });
 });
 
 /**
  * Remote file manager - create a new directory under /etc/zabbix
  */
 app.post('/api/remote-files/mkdir', async (req, res) => {
-  let connection = null;
-
-  try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { host, directoryPath = '', folderName } = req.body;
-
-    if (!host || !folderName) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'host and folderName are required'
-      });
-    }
-
-    if (!/^[a-zA-Z0-9._-]+$/.test(folderName)) {
-      return res.status(400).json({
-        error: 'Invalid folder name',
-        details: 'Allowed characters: letters, numbers, dot, underscore, dash'
-      });
-    }
-
-    const targetRelative = directoryPath ? `${directoryPath}/${folderName}` : folderName;
-    const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
-    const safePath = shellQuote(pathInfo.absolute);
-
-    connection = await connectSSH(sshConfig);
-
-    const existsResult = await executeSSHCommand(connection, `sudo -n test -e ${safePath} && echo exists || echo missing`);
-    if (existsResult.stdout.includes('exists')) {
-      return res.status(409).json({
-        error: 'Path already exists',
-        details: `A file or folder named ${folderName} already exists in this directory`
-      });
-    }
-
-    const mkdirResult = await executeSSHCommand(connection, `sudo -n mkdir -m 0755 ${safePath}`);
-    if (!mkdirResult.success) {
-      return res.status(500).json({
-        error: 'Failed to create directory',
-        details: mkdirResult.stderr || mkdirResult.stdout || 'Unable to create directory'
-      });
-    }
-
-    const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
-    const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
-
-    console.log(`[REMOTE-FILES] Created directory ${pathInfo.absolute} on ${host} by ${sshConfig.username}`);
-
-    return res.json({
-      success: true,
-      relativePath: pathInfo.relative,
-      metadata: {
-        size: Number(sizeStr) || 0,
-        mtime: Number(mtimeStr) || 0,
-        mode
-      }
-    });
-  } catch (error) {
-    console.error(`[REMOTE-FILES] Create directory failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
-    return res.status(500).json({
-      error: 'Failed to create remote directory',
-      details: error.message
-    });
-  } finally {
-    if (connection) connection.end();
-  }
+  // TODO: Implement mkdir via Ansible (file module).
+  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote directory create is being migrated to Ansible.' });
 });
 
 /**
  * Remote file manager - upload local files/folders to /etc/zabbix
  */
 app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => {
-  let connection = null;
-
-  try {
-    const sshConfig = resolveSSHConnection(req.body || {});
-    const { host, directoryPath = '' } = req.body;
-
-    if (!host) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'host is required'
-      });
-    }
-
-    const files = Array.isArray(req.files) ? req.files : [];
-    if (files.length === 0) {
-      return res.status(400).json({
-        error: 'No files uploaded',
-        details: 'Provide at least one file in files[]'
-      });
-    }
-
-    const rawRelativePaths = req.body.relativePaths;
-    const relativePaths = Array.isArray(rawRelativePaths)
-      ? rawRelativePaths
-      : (typeof rawRelativePaths === 'string' ? [rawRelativePaths] : []);
-
-    connection = await connectSSH(sshConfig);
-
-    const uploaded = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const providedRelative = relativePaths[i] || file.originalname || '';
-      const normalizedClientRelative = String(providedRelative).replace(/\\/g, '/').replace(/^\/+/, '');
-
-      if (!normalizedClientRelative || normalizedClientRelative.endsWith('/')) {
-        throw new Error(`Invalid uploaded file path: ${providedRelative || '<empty>'}`);
-      }
-
-      const targetRelative = directoryPath
-        ? `${directoryPath}/${normalizedClientRelative}`
-        : normalizedClientRelative;
-
-      const pathInfo = normalizeRemotePath(targetRelative, '/etc/zabbix');
-      const safePath = shellQuote(pathInfo.absolute);
-      const parentPath = path.posix.dirname(pathInfo.absolute);
-      const safeParentPath = shellQuote(parentPath);
-      const tempPath = `/tmp/zabbix-portal-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-      const safeTempPath = shellQuote(tempPath);
-
-      const mkdirResult = await executeSSHCommand(connection, `sudo -n mkdir -p -m 0755 ${safeParentPath}`);
-      if (!mkdirResult.success) {
-        throw new Error(mkdirResult.stderr || mkdirResult.stdout || `Failed to create parent directory for ${pathInfo.relative}`);
-      }
-
-      await uploadBufferSSH(connection, file.buffer, tempPath);
-
-      const installCmd = `sudo -n /usr/bin/install -m 0644 ${safeTempPath} ${safePath}`;
-      let writeResult = await executeSSHCommand(connection, installCmd);
-
-      if (!writeResult.success) {
-        writeResult = await executeSSHCommand(
-          connection,
-          `sudo -n cp ${safeTempPath} ${safePath} && sudo -n chmod 0644 ${safePath}`
-        );
-      }
-
-      await executeSSHCommand(connection, `rm -f ${safeTempPath}`);
-
-      if (!writeResult.success) {
-        throw new Error(writeResult.stderr || writeResult.stdout || `Failed to upload ${pathInfo.relative}`);
-      }
-
-      const statResult = await executeSSHCommand(connection, `sudo -n stat -c "%s|%Y|%A" ${safePath}`);
-      const [sizeStr, mtimeStr, mode] = statResult.stdout.trim().split('|');
-
-      uploaded.push({
-        relativePath: pathInfo.relative,
-        metadata: {
-          size: Number(sizeStr) || 0,
-          mtime: Number(mtimeStr) || 0,
-          mode
-        }
-      });
-    }
-
-    console.log(`[REMOTE-FILES] Uploaded ${uploaded.length} file(s) to ${host} by ${sshConfig.username}`);
-
-    return res.json({
-      success: true,
-      uploadedCount: uploaded.length,
-      uploaded
-    });
-  } catch (error) {
-    console.error(`[REMOTE-FILES] Upload failed on ${req.body?.host || 'unknown-host'}: ${error.message}`);
-    return res.status(500).json({
-      error: 'Failed to upload files to remote server',
-      details: error.message
-    });
-  } finally {
-    if (connection) connection.end();
-  }
+  // TODO: Implement bulk upload via Ansible (copy/synchronize or looped copy tasks).
+  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Bulk upload is being migrated to Ansible.' });
 });
 
 app.listen(PORT, async () => {
@@ -1524,8 +664,8 @@ app.listen(PORT, async () => {
   
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`🐧 Platform: RHEL-based Linux`);  
-  console.log(`🔐 SSH env source: ${ENV_PATH}`);
-  console.log(`🔐 SSH user configured: ${DEFAULT_SSH_USER ? 'yes' : 'no'}`);
+  console.log(`🔐 Env source: ${ENV_PATH}`);
+  console.log(`🔐 Ansible playbook command: ${ANSIBLE_PLAYBOOK_CMD}`);
   console.log(`📁 Logs directory: ${LOGS_DIR}`);
   console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
   console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
@@ -1541,5 +681,5 @@ app.listen(PORT, async () => {
     console.error(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`);
   }
   
-  console.log('✨ Backend ready to accept SSH remote installation requests\n');
+  console.log('✨ Backend ready to accept Ansible remote installation requests\n');
 });

@@ -18,7 +18,7 @@ import './App.css';
 
 function App() {
   const canHostBeActioned = (host) => host.status === 'No Agent' || host.status === 'Outdated' || host.status === 'Up to Date';
-  const resolvePreferredSSHHost = (host) => {
+  const resolvePreferredHost = (host) => {
     const ip = (host?.ip || '').trim();
     return ip && ip.toUpperCase() !== 'N/A' ? ip : (host?.hostname || '');
   };
@@ -274,7 +274,7 @@ function App() {
 
       try {
         await restartRemoteAgent({
-          host: resolvePreferredSSHHost(target),
+          host: resolvePreferredHost(target),
           hostname: target.hostname,
         });
         successCount += 1;
@@ -308,7 +308,7 @@ function App() {
 
   // Action handlers
   const handleInstall = async (host) => {
-    // Open SSH install modal for all hosts
+    // Open Ansible install modal for all hosts
     setSelectedHost(host);
     setActionType('install');
     setLocalInstallModalOpen(true);
@@ -333,7 +333,7 @@ function App() {
     }
 
     if (!isBatch) {
-      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via SSH...`);
+      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
       try {
         await installRemoteAgent(installData);
         toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
@@ -360,7 +360,7 @@ function App() {
       toast.loading(`${perHostVerb} on ${i + 1}/${targets.length}: ${target.hostname}`, { id: toastId });
 
       const payload = {
-        host: resolvePreferredSSHHost(target),
+        host: resolvePreferredHost(target),
         version: installData.version,
         serverIP: installData.serverIP,
         serverPort: installData.serverPort,
@@ -396,7 +396,7 @@ function App() {
   };
 
   const handleUpdate = async (host) => {
-    // Open SSH install modal for update (reuse same modal)
+    // Open Ansible install modal for update (reuse same modal)
     setSelectedHost(host);
     setActionType('update');
     setLocalInstallModalOpen(true);
@@ -599,7 +599,7 @@ function App() {
         )}
       </main>
 
-      {/* SSH Install/Update Modal */}
+      {/* Install/Update Modal (Ansible) */}
       <LocalInstallModal
         isOpen={localInstallModalOpen}
         onClose={handleCloseInstallModal}

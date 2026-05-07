@@ -1,0 +1,10 @@
+# Managed by Ansible
+PidFile=/run/zabbix/zabbix_agent2.pid
+LogFile=/var/log/zabbix/zabbix_agent2.log
+LogFileSize=0
+Server={{ serverIP }}
+ServerActive={{ serverIP }}:{{ serverPort | default(10051) }}
+Hostname={{ hostname }}
+Include=/etc/zabbix/zabbix_agent2.d/*.conf
+ControlSocket=/tmp/agent.sock
+ListenPort={{ listenerPort | default(10050) }}

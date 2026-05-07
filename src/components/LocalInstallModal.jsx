@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './LocalInstallModal.css';
 
-const resolvePreferredSSHHost = (host) => {
+const resolvePreferredHost = (host) => {
   if (!host) return '';
 
   const ip = (host.ip || '').trim();
@@ -19,7 +19,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   const actionTitle = isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install');
 
   const [formData, setFormData] = useState({
-    host: resolvePreferredSSHHost(selectedHost),
+    host: resolvePreferredHost(selectedHost),
     version: latestVersion,
     serverIP: '',
     serverPort: '10051',
@@ -44,7 +44,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
 
     setFormData(prev => ({
       ...prev,
-      host: resolvePreferredSSHHost(selectedHost),
+      host: resolvePreferredHost(selectedHost),
       hostname: selectedHost.hostname || '',
       version: action === 'update' && selectedHost.agentVersion
         ? selectedHost.agentVersion
@@ -86,7 +86,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{actionTitle} Zabbix Agent via SSH</h2>
+          <h2>{actionTitle} Zabbix Agent via Ansible</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 

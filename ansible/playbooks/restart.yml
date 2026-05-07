@@ -1,0 +1,36 @@
+- name: Restart Zabbix Agent Service
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Resolve installed Zabbix service
+      ansible.builtin.set_fact:
+        zabbix_service_name: >-
+          {{
+            'zabbix-agent2' if 'zabbix-agent2.service' in ansible_facts.services
+            else ('zabbix-agent' if 'zabbix-agent.service' in ansible_facts.services else '')
+          }}
+
+    - name: Fail when Zabbix service is not installed
+      ansible.builtin.fail:
+        msg: "Neither zabbix-agent2 nor zabbix-agent service is installed on target host"
+      when: zabbix_service_name | length == 0
+
+    - name: Restart detected Zabbix service
+      ansible.builtin.service:
+        name: "{{ zabbix_service_name }}"
+        state: restarted
+
+    - name: Verify service is active
+      ansible.builtin.service:
+        name: "{{ zabbix_service_name }}"
+        state: started
+        enabled: true
+
+    - name: Report restart result
+      ansible.builtin.debug:
+        msg: "Restarted {{ zabbix_service_name }} on {{ inventory_hostname }}"

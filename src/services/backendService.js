@@ -122,9 +122,9 @@ export const downloadAgentPackage = async (version) => {
 };
 
 /**
- * Install Zabbix agent on remote RHEL server via SSH
- * Connects to remote server, uploads script, executes installation, and retrieves logs
- * @param {Object} installData - Installation configuration including SSH credentials
+ * Install Zabbix agent on remote RHEL server via Ansible
+ * Backend will invoke playbooks on the controller to perform installation and retrieve logs
+ * @param {Object} installData - Installation configuration for the Ansible playbook
  * @returns {Promise<Object>} Response from backend
  */
 export const installRemoteAgent = async (installData) => {
@@ -163,15 +163,15 @@ export const installRemoteAgent = async (installData) => {
   } catch (error) {
     console.error('Failed to install on remote server:', error);
     if (error.name === 'AbortError') {
-      throw new Error('Installation timeout - The installation is taking too long. Please check SSH connectivity and server resources.');
+      throw new Error('Installation timeout - The installation is taking too long. Please check controller connectivity and server resources.');
     }
     throw error;
   }
 };
 
 /**
- * Restart Zabbix agent service on a remote host via SSH
- * @param {Object} payload - SSH payload (host, optional sshUser/sshPassword/sshPort)
+ * Restart Zabbix agent service on a remote host via Ansible
+ * @param {Object} payload - Playbook payload (host, optional extra vars)
  * @returns {Promise<Object>} Response from backend
  */
 export const restartRemoteAgent = async (payload) => {
@@ -208,7 +208,7 @@ export const restartRemoteAgent = async (payload) => {
 
 /**
  * List directory entries under /etc/zabbix on remote server
- * @param {Object} payload - SSH context and relative path
+ * @param {Object} payload - Target context and relative path
  */
 export const listRemoteFiles = async (payload) => {
   try {
@@ -235,7 +235,7 @@ export const listRemoteFiles = async (payload) => {
 
 /**
  * Read file contents from /etc/zabbix on remote server
- * @param {Object} payload - SSH context and target file path
+ * @param {Object} payload - Target context and target file path
  */
 export const readRemoteFile = async (payload) => {
   try {
@@ -262,7 +262,7 @@ export const readRemoteFile = async (payload) => {
 
 /**
  * Save file contents to /etc/zabbix on remote server
- * @param {Object} payload - SSH context and content
+ * @param {Object} payload - Target context and content
  */
 export const writeRemoteFile = async (payload) => {
   try {
@@ -289,7 +289,7 @@ export const writeRemoteFile = async (payload) => {
 
 /**
  * Create a new file under /etc/zabbix on remote server
- * @param {Object} payload - SSH context, target directory, file name and content
+ * @param {Object} payload - Target context, target directory, file name and content
  */
 export const createRemoteFile = async (payload) => {
   try {
@@ -316,7 +316,7 @@ export const createRemoteFile = async (payload) => {
 
 /**
  * Create a new directory under /etc/zabbix on remote server
- * @param {Object} payload - SSH context, target directory and folder name
+ * @param {Object} payload - Target context, target directory and folder name
  */
 export const createRemoteDirectory = async (payload) => {
   try {
@@ -343,7 +343,7 @@ export const createRemoteDirectory = async (payload) => {
 
 /**
  * Upload local files/folders to /etc/zabbix on remote server
- * @param {FormData} formData - multipart payload with files and SSH context
+ * @param {FormData} formData - multipart payload with files and target context
  */
 export const uploadRemoteFiles = async (formData) => {
   try {

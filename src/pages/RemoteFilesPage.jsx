@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Folder, FileText, RefreshCw, Save, PlusCircle, FolderPlus, Upload } from 'lucide-react';
 import {
@@ -13,14 +13,14 @@ import './RemoteFilesPage.css';
 
 const DEFAULT_ROOT = '/etc/zabbix';
 
-const resolvePreferredSSHHost = (host) => {
+const resolvePreferredHost = (host) => {
   const ip = (host?.ip || '').trim();
   return ip && ip.toUpperCase() !== 'N/A' ? ip : (host?.hostname || '');
 };
 
-const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
+const RemoteFilesPage = ({ hosts = [] }) => {
   const hostOptions = useMemo(
-    () => hosts.filter((h) => resolvePreferredSSHHost(h)).sort((a, b) => a.hostname.localeCompare(b.hostname)),
+    () => hosts.filter((h) => resolvePreferredHost(h)).sort((a, b) => a.hostname.localeCompare(b.hostname)),
     [hosts]
   );
 
@@ -43,12 +43,6 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
   const [bulkUploadPath, setBulkUploadPath] = useState('');
   const fileUploadInputRef = useRef(null);
   const folderUploadInputRef = useRef(null);
-
-  useEffect(() => {
-    if (!preferredHost) return;
-
-    setBrowseHost(resolvePreferredSSHHost(preferredHost));
-  }, [preferredHost]);
 
   const runList = async (relativePath = '', hostOverride = connectedBrowseHost) => {
     setLoadingList(true);
@@ -86,7 +80,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
   const handleBulkConnect = async () => {
     const targets = hostOptions
       .filter((host) => selectedUploadHostIds.includes(String(host.id ?? host.hostname)))
-      .map((host) => resolvePreferredSSHHost(host))
+      .map((host) => resolvePreferredHost(host))
       .filter(Boolean);
 
     if (targets.length === 0) {
@@ -307,14 +301,14 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
     const host = hostOptions.find((h) => String(h.id) === hostId);
     if (!host) return;
 
-    setBrowseHost(resolvePreferredSSHHost(host));
+    setBrowseHost(resolvePreferredHost(host));
   };
 
   return (
     <div className="remote-files-page">
       <div className="remote-files-header">
         <h1>Remote File Manager</h1>
-        <p>Browse and edit files under {DEFAULT_ROOT} through SSH.</p>
+        <p>Browse and edit files under {DEFAULT_ROOT} through Ansible (migration in progress).</p>
       </div>
 
       <section className="upload-panel">
@@ -353,7 +347,7 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
                       checked={selectedUploadHostIds.includes(hostId)}
                       onChange={() => toggleUploadHost(hostId)}
                     />
-                    <span>{host.hostname} ({resolvePreferredSSHHost(host)})</span>
+                    <span>{host.hostname} ({resolvePreferredHost(host)})</span>
                   </label>
                 );
               })}
@@ -453,14 +447,14 @@ const RemoteFilesPage = ({ hosts = [], preferredHost = null }) => {
         </div>
 
         <div className="editor-pane">
-          <section className="ssh-panel editor-connect-panel">
+          <section className="remote-panel editor-connect-panel">
             <div className="field">
               <label>Single host (browse/edit)</label>
               <select onChange={(e) => onHostChange(e.target.value)} defaultValue="">
                 <option value="">Select host</option>
                 {hostOptions.map((host) => (
                   <option key={host.id} value={host.id}>
-                    {host.hostname} ({resolvePreferredSSHHost(host)})
+                    {host.hostname} ({resolvePreferredHost(host)})
                   </option>
                 ))}
               </select>
