@@ -69,49 +69,41 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   const ansibleRoot = path.resolve(__dirname, '../ansible');
   const ansibleConfigPath = path.join(ansibleRoot, 'ansible.cfg');
   const inventory = `${host},`;
-  const extraVarsJson = JSON.stringify(extraVars || {});
+  const playbookVars = { ...(extraVars || {}) };
   
   // Read SSH credentials from environment variables
   const sshUser = process.env.ANSIBLE_SSH_USER || 'root';
   const sshPassword = process.env.ANSIBLE_SSH_PASSWORD || '';
   const sshPort = process.env.ANSIBLE_SSH_PORT || '22';
   const sshKeyFile = process.env.ANSIBLE_SSH_PRIVATE_KEY_FILE || '';
+
+  // Pass connection values as Ansible variables so non-interactive auth works reliably.
+  playbookVars.ansible_user = sshUser;
+  playbookVars.ansible_port = sshPort;
+  if (sshKeyFile) {
+    playbookVars.ansible_ssh_private_key_file = sshKeyFile;
+  } else if (sshPassword) {
+    playbookVars.ansible_password = sshPassword;
+  }
+
+  const extraVarsJson = JSON.stringify(playbookVars);
   
   // Build ansible-playbook command with SSH credentials
   let cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
-  
-  // Add SSH user
-  cmd += ` --user ${shellQuote(sshUser)}`;
-  
-  // Add SSH port
-  cmd += ` -e ansible_port=${shellQuote(sshPort)}`;
-  
-  // Add key-based or password-based authentication
-  if (sshKeyFile) {
-    // Key-based authentication
-    cmd += ` --private-key ${shellQuote(sshKeyFile)}`;
-    console.log(`[ANSIBLE] Using key-based authentication: ${sshKeyFile}`);
-  } else if (sshPassword) {
-    // Password-based authentication via environment variable
-    console.log(`[ANSIBLE] Using password-based authentication for user: ${sshUser}`);
-  }
-  
-  // For password-based auth with sshpass, add -k flag to prompt for password
-  if (sshPassword && !sshKeyFile) {
-    cmd += ` -k`;
-  }
 
-  console.log(`[ANSIBLE] Running: ${cmd}`);
+  if (sshKeyFile) {
+    console.log(`[ANSIBLE] Using key-based authentication for user ${sshUser}`);
+  } else if (sshPassword) {
+    console.log(`[ANSIBLE] Using password-based authentication for user ${sshUser}`);
+  } else {
+    console.log(`[ANSIBLE] No password/key configured, relying on SSH agent or default keys for user ${sshUser}`);
+  }
+  console.log(`[ANSIBLE] Running playbook ${playbookPath} on host ${host}`);
   
   const envVars = {
     ...process.env,
     ANSIBLE_CONFIG: ansibleConfigPath
   };
-  
-  // For password-based auth, pass ANSIBLE_PASSWORD environment variable
-  if (sshPassword && !sshKeyFile) {
-    envVars.ANSIBLE_PASSWORD = sshPassword;
-  }
   
   const result = await executeShellCommand(cmd, {
     timeout: 10 * 60 * 1000,
@@ -149,6 +141,25 @@ function resolveTargetHost(body) {
     throw new Error('host is required');
   }
   return host;
+}
+
+/**
+ * Map common Ansible stderr patterns to an HTTP status for better API diagnostics.
+ */
+function classifyAnsibleFailureStatus(stderr = '', fallback = 500) {
+  const msg = String(stderr || '').toLowerCase();
+  if (
+    msg.includes('unreachable') ||
+    msg.includes('all configured authentication methods failed') ||
+    msg.includes('permission denied') ||
+    msg.includes('connection timed out') ||
+    msg.includes('no route to host') ||
+    msg.includes('connection refused') ||
+    msg.includes('could not resolve hostname')
+  ) {
+    return 503;
+  }
+  return fallback;
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -540,7 +551,8 @@ app.post('/api/install-remote', async (req, res) => {
       return res.json({ success: true, message: `Ansible playbook ran for ${host}`, output: result.stdout });
     }
 
-    return res.status(500).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
+    const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+    return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
     console.error('[ANSIBLE-INSTALL] Failed:', error);
     return res.status(500).json({ success: false, error: 'Installation failed', details: error.message });
@@ -560,7 +572,8 @@ app.post('/api/restart-agent', async (req, res) => {
       return res.json({ success: true, message: `Restart playbook ran for ${host}`, output: result.stdout });
     }
 
-    return res.status(500).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
+    const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+    return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
     console.error('[ANSIBLE-RESTART] Failed:', error);
     return res.status(500).json({ success: false, error: 'Restart failed', details: error.message });
