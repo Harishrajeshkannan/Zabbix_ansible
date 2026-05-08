@@ -1,157 +1,119 @@
 # Security Setup for Zabbix Deployment Portal
 
-## ⚠️ IMPORTANT: Passwordless Sudo Configuration
+## Authentication & Credentials Management
 
-This application requires **passwordless sudo** for the installation script. This is standard practice in DevOps automation.
+This application uses **Ansible for remote host management**. Credentials are managed securely via environment variables and Ansible's connection mechanisms.
 
-### Why Passwordless Sudo?
+### Security Approach
 
-✅ **Security**: No passwords transmitted over HTTP  
-✅ **Industry Standard**: Used in Ansible, Chef, Puppet  
-✅ **Audit Trail**: All actions logged via sudo logs  
-✅ **Restricted Access**: Only specific script can run elevated  
-
-❌ **NOT using**: `NOPASSWD: ALL` (dangerous)  
-✅ **Using**: Path-restricted passwordless sudo  
+✅ **SSH-based Authentication**: Supports both password and key-based auth  
+✅ **Environment-based Secrets**: Credentials stored in `.env` (not in code)  
+✅ **Ansible Privilege Escalation**: Uses `become: true` with sudo  
+✅ **No Hardcoded Passwords**: All credentials externalized  
+✅ **Audit Trail**: Ansible logs all execution and configuration changes  
 
 ---
 
 ## Setup Instructions
 
-### 1. Create Sudoers Configuration
+### 1. Configure Environment Variables
 
-Create a dedicated sudoers file:
-
-```bash
-sudo visudo -f /etc/sudoers.d/zabbix-deployment
-```
-
-### 2. Add Restricted Permission
-
-Replace `nodeuser` with the user running the Node.js backend:
+Create a `.env` file in the application root with authentication credentials:
 
 ```bash
-# Allow Node.js backend user to run installation script without password
-nodeuser ALL=(ALL) NOPASSWD: /path/to/server/install-zabbix-rhel.sh
+# SSH Connection Settings
+ANSIBLE_SSH_USER=your_remote_user
+ANSIBLE_SSH_PASSWORD=your_password
+ANSIBLE_SSH_PORT=22
+# OR use key-based auth:
+ANSIBLE_SSH_PRIVATE_KEY_FILE=/path/to/private/key
+
+# Ansible Privilege Escalation
+ANSIBLE_BECOME_PASSWORD=sudo_password_if_needed
 ```
 
-**Example for user `harish`:**
+### 2. Prepare Remote Hosts
+
+Ensure target hosts have:
+- SSH access enabled with the configured user
+- Sudo privileges (for agent installation)
+- Network connectivity to the Ansible controller
+
+### 3. Set File Permissions (Linux/macOS)
 
 ```bash
-harish ALL=(ALL) NOPASSWD: /home/harish/zabbix-portal/server/install-zabbix-rhel.sh
+chmod 600 .env
+chmod 600 /path/to/private/key
 ```
 
-### 3. Set Correct Permissions
+### 4. Test Ansible Connectivity
 
 ```bash
-sudo chmod 0440 /etc/sudoers.d/zabbix-deployment
-sudo chown root:root /etc/sudoers.d/zabbix-deployment
+ansible all -i "target_host," -m ping
 ```
-
-### 4. Verify Configuration
-
-Test without password prompt:
-
-```bash
-sudo /path/to/server/install-zabbix-rhel.sh --help
-```
-
-Should run immediately without asking for password.
 
 ---
 
 ## Security Best Practices
 
-### ✅ DO
-
-- Use path-restricted `NOPASSWD` only for specific script
-- Run backend as dedicated service user (not root)
-- Use absolute paths in sudoers
-- Audit `/var/log/secure` for sudo usage
-- Restrict file permissions on installation script
-
-### ❌ DO NOT
-
-- Use `NOPASSWD: ALL` (gives unrestricted root access)
-- Run Node.js backend as root
-- Expose API to public internet without authentication
-- Log sensitive data (PSK keys, etc.)
+- Store `.env` files outside version control (add to `.gitignore`)
+- Rotate SSH keys and passwords regularly
+- Use SSH keys instead of passwords when possible
+- Restrict `.env` file permissions to the application user only
+- Review Ansible logs regularly for unauthorized access attempts
 
 ---
 
 ## Troubleshooting
 
-### "sudo: a password is required"
+### "ERROR! couldn't resolve module/action 'service_facts'"
 
-Check sudoers configuration:
-
+Ensure Ansible version is 2.5+:
 ```bash
-sudo visudo -c  # Check syntax
-sudo -l -U nodeuser  # List sudo permissions
+ansible --version
 ```
 
-### Permission Denied
+### Connection timeout to target host
 
-Ensure script is executable:
-
+Check network connectivity and firewall rules:
 ```bash
-chmod +x /path/to/install-zabbix-rhel.sh
+ansible all -i "target_host," -m ping
 ```
 
-### SELinux Issues
+### "Permission denied (publickey,password)"
 
-If SELinux is enforcing:
-
+Verify SSH credentials in `.env`:
 ```bash
-sudo chcon -t bin_t /path/to/install-zabbix-rhel.sh
+ssh -v -u ${ANSIBLE_SSH_USER} target_host
+```
+
+### "fatal: [target]: UNREACHABLE!"
+
+Check target host SSH service is running:
+```bash
+# On target host:
+sudo systemctl status sshd
 ```
 
 ---
 
 ## Production Deployment Checklist
 
-- [ ] Passwordless sudo configured for installation script only
-- [ ] Backend runs as dedicated service user (not root)
-- [ ] Installation script has restrictive permissions (755)
-- [ ] Sudoers file has correct permissions (440)
-- [ ] Audit logging enabled for sudo commands
-- [ ] API endpoint has authentication (if exposed)
+- [x] Credentials stored in environment variables (not hardcoded)
+- [x] Backend runs as dedicated service user (not root)
+- [ ] SSH keys configured for key-based authentication
+- [ ] Target hosts have SSH enabled and accessible
+- [ ] Ansible controller has `ansible-playbook` installed
+- [ ] API endpoint has authentication layer (if exposed)
 - [ ] HTTPS enabled for production frontend
 - [ ] Input validation enabled on all endpoints
-- [ ] Installation logs rotated and monitored
+- [ ] Installation logs monitored for errors
+- [ ] Ansible operations audited and logged
 
 ---
 
-## Alternative: Using Systemd Service
+## References
 
-For even better security, wrap the installation in a systemd service that the backend can trigger.
-
-Example:
-
-```ini
-[Unit]
-Description=Zabbix Agent Installation Service
-
-[Service]
-Type=oneshot
-ExecStart=/path/to/install-zabbix-rhel.sh %i
-User=root
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then backend only needs:
-
-```bash
-sudo systemctl start zabbix-install@7.0.5
-```
-
----
-
-## Questions?
-
-Read: https://wiki.archlinux.org/title/Sudo  
-Read: https://www.sudo.ws/docs/man/sudoers.man/
-
-**Remember**: Security through restricted permissions, not obscurity.
+- [Ansible Documentation](https://docs.ansible.com/)
+- [Ansible SSH Connection](https://docs.ansible.com/ansible/latest/inventory/connection_details.html)
+- [SSH Key-Based Authentication](https://wiki.archlinux.org/title/SSH_keys)

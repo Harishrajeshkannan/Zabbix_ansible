@@ -63,7 +63,7 @@ async function executeShellCommand(command, options = {}) {
 /**
  * Run an Ansible playbook against a single target host.
  * Uses a one-host inline inventory so the controller runs the tasks on `host`.
- * SSH credentials are read from environment variables for authentication.
+ * Ansible connection credentials are read from environment variables for authentication.
  */
 async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   const ansibleRoot = path.resolve(__dirname, '../ansible');
@@ -71,7 +71,7 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   const inventory = `${host},`;
   const playbookVars = { ...(extraVars || {}) };
   
-  // Read SSH credentials from environment variables
+  // Read Ansible connection credentials from environment variables
   const sshUser = (process.env.ANSIBLE_SSH_USER || '').trim();
   const sshPassword = process.env.ANSIBLE_SSH_PASSWORD || '';
   const sshPort = (process.env.ANSIBLE_SSH_PORT || '22').trim();
@@ -95,7 +95,7 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
 
   const extraVarsJson = JSON.stringify(playbookVars);
   
-  // Build ansible-playbook command with SSH credentials
+  // Build ansible-playbook command with connection credentials
   let cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
 
   // Add -k flag if using password auth so Ansible prompts for password (sshpass intercepts)
@@ -108,7 +108,7 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   } else if (sshPassword) {
     console.log(`[ANSIBLE] Using password-based authentication for user ${sshUser}`);
   } else {
-    console.log(`[ANSIBLE] No password/key configured, relying on SSH agent or default keys for user ${sshUser}`);
+    console.log(`[ANSIBLE] No password/key configured, relying on controller connection defaults for user ${sshUser}`);
   }
   console.log(`[ANSIBLE] Running playbook ${playbookPath} on host ${host}`);
   
@@ -650,11 +650,12 @@ app.get('/api/system-info', async (req, res) => {
 });
 
 /**
- * Cleanup temporary files
+ * Cleanup temporary files created by Ansible operations
  */
 app.post('/api/cleanup-temp', async (req, res) => {
   try {
-    const result = await executeShellCommand('find /tmp -name "zabbix_install_*.sh" -mtime +0 -delete 2>/dev/null; find /tmp -name "zabbix_install_*.log" -mtime +1 -delete 2>/dev/null; echo "Cleanup completed"');
+    // Clean up old persistent RPM cache and temporary Ansible-related files
+    const result = await executeShellCommand('find /tmp -name "zabbix_agent_download_*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null; find /tmp -name "ansible_*" -type d -mtime +1 -exec rm -rf {} + 2>/dev/null; echo "Cleanup completed"');
     
     console.log('Temp cleanup:', result.stdout);
     

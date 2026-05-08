@@ -42,14 +42,21 @@ npm install
 sudo yum install -y curl wget || sudo dnf install -y curl wget
 ```
 
-### 4. Configure Passwordless Sudo
-```bash
-# Run the automated setup script
-cd server
-sudo bash setup-sudo.sh
+### 4. Configure Ansible Authentication
 
-# Or see server/SECURITY_SETUP.md for manual configuration
+Set up environment variables for SSH authentication. Create a `.env` file:
+
+```bash
+# SSH credentials for Ansible
+ANSIBLE_SSH_USER=your_remote_user
+ANSIBLE_SSH_PASSWORD=your_password
+ANSIBLE_SSH_PORT=22
+
+# For key-based authentication (alternative):
+# ANSIBLE_SSH_PRIVATE_KEY_FILE=/path/to/private/key
 ```
+
+See [server/SECURITY_SETUP.md](server/SECURITY_SETUP.md) for detailed configuration.
 
 ## Running the Application
 
@@ -116,21 +123,9 @@ After installation:
 - PSK Key: `your-secret-psk-key-here`
 - PSK Identity: `prod-server-01`
 
-## Manual Script Usage
+## Ansible Deployment
 
-You can also run the installation script directly:
-
-### Interactive Mode
-```bash
-cd server
-chmod +x install-zabbix-rhel.sh
-./install-zabbix-rhel.sh
-```
-
-### Command Line Mode
-```bash
-./install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver 10051 "psk-key" "psk-identity"
-```
+The portal now deploys agents through the backend, which runs Ansible playbooks. There is no separate shell-script deployment path.
 
 ## Troubleshooting
 
@@ -138,14 +133,11 @@ chmod +x install-zabbix-rhel.sh
 
 #### "Permission denied" when installing agent
 ```bash
-# Verify passwordless sudo is configured
-sudo -l | grep install-zabbix-rhel.sh
+# Verify the controller environment has Ansible credentials
+env | grep '^ANSIBLE_SSH_'
 
-# Should show: NOPASSWD: /path/to/install-zabbix-rhel.sh
-
-# If not configured, run setup:
-cd server
-sudo bash setup-sudo.sh
+# Verify the target host is reachable from the controller
+ansible -i 'your-host,' all -m ping
 ```
 
 #### Frontend not loading
@@ -179,8 +171,8 @@ ping -c 3 repo.zabbix.com
 
 1. **Check Logs**: View installation logs in the web interface
 2. **System Logs**: `sudo journalctl -u zabbix-agent2 -f`
-3. **Manual Test**: Run the installation script manually
-4. **Network**: Verify connectivity to Zabbix server and repositories
+3. **Manual Test**: Run the Ansible playbook manually from the controller
+4. **Network**: Verify connectivity to Zabbix server, repositories, and target hosts
 
 ## What's Next?
 
@@ -200,7 +192,7 @@ npm run dev:full
 # Make changes to:
 # - Frontend: src/ directory
 # - Backend: server/ directory
-# - Installation script: server/install-zabbix-rhel.sh
+# - Deployment logic: ansible/playbooks/ and ansible/roles/
 
 # Changes will auto-reload in development mode
 ```

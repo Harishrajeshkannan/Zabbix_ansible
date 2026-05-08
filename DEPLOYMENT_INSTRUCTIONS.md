@@ -21,9 +21,9 @@ The Zabbix Deployment Portal now runs natively on RHEL systems and installs Zabb
 - **Network**: Internet connectivity for package repositories
 
 ### User Requirements
-- **Sudo Access**: User must have sudo privileges with password
-- **Shell Access**: Bash shell access to the server
-- **Package Management**: Access to install system packages
+- **Backend Access**: Node.js service configured to run Ansible playbooks
+- **Shell Access**: Bash shell access to the Ansible controller
+- **Package Management**: Access to install system packages on the target host
 
 ### Network Requirements
 - **Outbound HTTP/HTTPS**: Access to repo.zabbix.com (port 80/443)
@@ -72,37 +72,26 @@ The portal now uses a native RHEL installation approach:
 
 ## Authentication
 
-The system uses **passwordless sudo** configuration (industry-standard DevOps approach):
+The system uses **Ansible connection credentials** configured in the backend environment:
 
-- **No Password Required**: Backend user configured in `/etc/sudoers.d/`
-- **Path-Restricted**: Sudo only allowed for specific installation script
-- **Audit Logging**: All actions logged to `/var/log/secure`
+- **Target Host User**: Set `ANSIBLE_SSH_USER`
+- **Password or Key**: Set `ANSIBLE_SSH_PASSWORD` or `ANSIBLE_SSH_PRIVATE_KEY_FILE`
+- **Audit Logging**: All actions are logged by the backend and Ansible output is returned to the UI
 
-See [server/SECURITY_SETUP.md](server/SECURITY_SETUP.md) for complete setup instructions.
+See [server/SECURITY_SETUP.md](server/SECURITY_SETUP.md) and the root `.env.example` for setup details.
 
 ## Security Features
 
-- **Passwordless Sudo**: Path-restricted sudo configuration (NOT NOPASSWD: ALL)
+- **Ansible Controller**: Playbooks execute from the backend against target hosts
 - **Input Validation**: Strict regex patterns prevent command injection
 - **Direct Execution**: No temporary scripts or intermediate files
 - **Repository Verification**: Uses official Zabbix GPG-signed packages
 - **Service Isolation**: Zabbix agent runs as dedicated zabbix user
 - **No HTTP Passwords**: Zero credential transmission over network
 
-## Manual Installation
+## Ansible Deployment
 
-You can also run the installation script directly:
-
-```bash
-# Make script executable
-chmod +x server/install-zabbix-rhel.sh
-
-# Interactive mode
-./server/install-zabbix-rhel.sh
-
-# Command line mode
-./server/install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver 10051 "psk-key" "psk-identity"
-```
+The backend invokes Ansible playbooks directly. There is no separate shell-script deployment path.
 
 ## Troubleshooting
 
@@ -110,11 +99,11 @@ chmod +x server/install-zabbix-rhel.sh
 
 #### Permission Denied
 ```bash
-# Verify sudo access
-sudo -l
+# Verify the controller environment has Ansible credentials
+env | grep '^ANSIBLE_SSH_'
 
-# Check user groups
-groups $USER
+# Verify the target host is reachable from the controller
+ansible -i 'your-host,' all -m ping
 ```
 
 #### Repository Errors
@@ -167,11 +156,15 @@ sudo systemctl start zabbix-portal
 
 ### 2. Security Hardening
 ```bash
-# Create dedicated user
-sudo useradd -r -s /bin/bash zabbix-portal
+# SSH Connection Settings
+ANSIBLE_SSH_USER=your_remote_user
+ANSIBLE_SSH_PASSWORD=your_password
+ANSIBLE_SSH_PORT=22
+# OR use key-based authentication:
+ANSIBLE_SSH_PRIVATE_KEY_FILE=/path/to/private/key
 
-# Configure sudo access (minimal permissions)
-echo "zabbix-portal ALL=(ALL) NOPASSWD: /usr/bin/yum install zabbix-agent2, /usr/bin/dnf install zabbix-agent2, /usr/bin/systemctl * zabbix-agent2" | sudo tee /etc/sudoers.d/zabbix-portal
+# Ensure proper permissions
+chmod 600 .env
 ```
 
 ### 3. Firewall Configuration
@@ -185,13 +178,11 @@ sudo firewall-cmd --reload
 
 ### Security Configuration
 
-This system uses **passwordless sudo** for automation:
+This system uses **Ansible host authentication** for automation:
 
-1. **Secure by Design**: Uses path-restricted sudo permissions
-2. **No Passwords Over Network**: Industry-standard DevOps practice
-3. **Audit Trail**: All actions logged to `/var/log/secure`
-4. **Easy Setup**: Run `cd server && ./setup-sudo.sh`
-
-**See:** `PASSWORDLESS_SUDO_QUICKSTART.md` for setup instructions
+1. **Secure by Design**: Credentials are stored in the backend environment
+2. **No Passwords In UI**: Authentication is handled server-side by the controller
+3. **Audit Trail**: All actions are logged by the backend and Ansible output
+4. **Easy Setup**: Configure `ANSIBLE_SSH_*` values in the backend environment
 
 The user interface provides a clean, modern experience for deploying Zabbix agents to RHEL servers using native package management.

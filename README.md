@@ -8,7 +8,7 @@ This portal provides a simple web interface to install and manage Zabbix Agent 2
 
 - **Frontend**: React-based web interface built with Vite
 - **Backend**: Node.js/Express server with installation APIs
-- **Installation**: Shell scripts for automated RHEL installation
+- **Installation**: Ansible playbooks executed by the backend controller
 
 ## Features
 
@@ -25,12 +25,12 @@ This portal provides a simple web interface to install and manage Zabbix Agent 2
 - RHEL-based operating system (RHEL, CentOS, Rocky, AlmaLinux)
 - Node.js 16+ and npm
 - Internet connectivity for package downloads
-- Passwordless sudo configured for installation script
+- Ansible controller access to target hosts
 
 ### System Dependencies
 - `bash` shell  
-- Network connectivity to Zabbix repositories
-- Configure passwordless sudo (see [server/SECURITY_SETUP.md](server/SECURITY_SETUP.md))
+- `ansible-playbook` available on the controller
+- Network connectivity to Zabbix repositories and target hosts
 
 ## Quick Start
 
@@ -59,8 +59,8 @@ npm run server   # Backend only
 
 1. **Select Version**: Choose from available Zabbix Agent versions
 2. **Configure Settings**: Set server IP, hostname, and encryption
-3. **Provide Credentials**: Enter sudo user and password
-4. **Install**: Automated installation via RHEL repositories
+3. **Provide Credentials**: Configure the backend environment for Ansible host access
+4. **Install**: Backend runs Ansible playbooks against the target host
 5. **Verify**: Check service status and connectivity
 
 ## Configuration
@@ -73,18 +73,8 @@ ZABBIX_DEFAULT_VERSION=7.0.5
 ZABBIX_DEFAULT_PORT=10051
 ```
 
-### Manual Installation
-You can also run the installation script directly:
-```bash
-# Make script executable
-chmod +x server/install-zabbix-rhel.sh
-
-# Interactive installation
-./server/install-zabbix-rhel.sh
-
-# Command line installation
-./server/install-zabbix-rhel.sh 7.0.5 192.168.1.100 myserver.local 10051 "psk-key" "psk-identity"
-```
+### Ansible Deployment
+The portal deploys agents through the backend, which runs Ansible playbooks. There is no separate shell-script deployment path.
 
 ## API Endpoints
 
@@ -101,10 +91,9 @@ chmod +x server/install-zabbix-rhel.sh
 Zabbix-Deployment-Portal/
 ├── src/                    # React frontend
 ├── server/                 # Node.js backend
-│   ├── index.js           # Main server file
-│   ├── install-zabbix-rhel.sh # RHEL installation script
-│   ├── setup-sudo.sh      # Passwordless sudo setup
-│   └── SECURITY_SETUP.md  # Security configuration guide
+│   ├── index.js           # Main server file (Ansible controller)
+│   └── SECURITY_SETUP.md  # Security & authentication guide
+├── ansible/               # Ansible playbooks and roles
 ├── agent-logs/            # Installation logs
 ├── package.json
 └── README.md
@@ -118,15 +107,15 @@ This application is built for **RHEL-based Linux systems**:
 - ✅ **Repository-based**: Official Zabbix repositories
 - ✅ **Secure Installation**: Signed packages from trusted sources
 - ✅ **Standard Package Management**: Integrates with RHEL ecosystem
-- ✅ **Passwordless Sudo**: Industry-standard automation pattern
+- ✅ **Ansible Controller**: Backend orchestrates remote installs through playbooks
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Passwordless Sudo Not Configured**
-   - Run: `cd server && ./setup-sudo.sh`
-   - See: PASSWORDLESS_SUDO_QUICKSTART.md
+1. **Ansible Host Authentication Fails**
+   - Verify backend environment variables for Ansible host access
+   - Ensure the controller can reach the target host over SSH
 
 2. **Repository Not Found**
    - Verify RHEL version compatibility
@@ -165,7 +154,7 @@ npm run dev:full
 ### Adding Features
 1. Backend changes: Modify `server/index.js`
 2. Frontend changes: Modify files in `src/`
-3. Installation logic: Update `server/install-zabbix-rhel.sh`
+3. Installation logic: Update `ansible/playbooks/` and `ansible/roles/`
 
 ## License
 
