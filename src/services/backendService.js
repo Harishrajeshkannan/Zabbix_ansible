@@ -1,4 +1,6 @@
-const BACKEND_API_URL = import.meta.env.VITE_BACKEND_API_URL || '/api';
+import { resolveBackendApiUrl } from './apiBase';
+
+const BACKEND_API_URL = resolveBackendApiUrl();
 
 const parseApiResponse = async (response) => {
   const raw = await response.text();

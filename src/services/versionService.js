@@ -2,7 +2,9 @@
  * Version Service - Manages Zabbix Agent versions for RHEL
  */
 
-const API_BASE = import.meta.env.VITE_BACKEND_API_URL || '/api';
+import { resolveBackendApiUrl } from './apiBase';
+
+const API_BASE = resolveBackendApiUrl();
 
 /**
  * Fetch available Zabbix agent versions from RHEL repositories
