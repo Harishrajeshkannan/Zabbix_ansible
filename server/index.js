@@ -32,7 +32,7 @@ const LOG_FILE = path.join(LOG_DIR, 'server.log');
 async function ensureLogDir() {
   try {
     await fs.mkdir(LOG_DIR, { recursive: true });
-  } catch (e) {
+  } catch {
     // ignore mkdir errors
   }
 }
@@ -43,10 +43,27 @@ async function writeServerLog(level, message) {
     const ts = new Date().toISOString();
     const line = `${ts} [${level}] ${typeof message === 'string' ? message : JSON.stringify(message)}\n`;
     await fs.appendFile(LOG_FILE, line);
-  } catch (e) {
+  } catch {
     // writing logs should not break the app
-    console.error('Failed to write server log:', e);
+    console.error('Failed to write server log');
   }
+}
+
+function truncateText(value, maxLength = 2000) {
+  const text = typeof value === 'string' ? value : String(value || '');
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength)}... [truncated ${text.length - maxLength} chars]`;
+}
+
+function redactSensitiveText(value) {
+  const text = typeof value === 'string' ? value : String(value || '');
+  return text
+    .replace(/("ansible_password"\s*:\s*")[^"]+(")/g, '$1[REDACTED]$2')
+    .replace(/("ansible_ssh_private_key_file"\s*:\s*")[^"]+(")/g, '$1[REDACTED]$2')
+    .replace(/(ANSIBLE_SSH_PASSWORD=)[^\s'"`]+/g, '$1[REDACTED]');
 }
 
 function logInfo(msg) {
@@ -67,8 +84,9 @@ function logError(msg, err) {
  */
 async function executeShellCommand(command, options = {}) {
   const { timeout = 180000, maxBuffer = 5 * 1024 * 1024, cwd, env } = options;
+  const redactedCommand = redactSensitiveText(command);
   
-  logInfo(`[executeShellCommand] Received command: "${command}"`);
+  logInfo(`[executeShellCommand] Received command: "${redactedCommand}"`);
   logInfo(`[executeShellCommand] Command length: ${command.length}`);
   logInfo(`[executeShellCommand] Timeout: ${timeout}ms`);
   
@@ -82,9 +100,21 @@ async function executeShellCommand(command, options = {}) {
     });
     
     logInfo(`[executeShellCommand] Execution successful`);
+    if (stdout && stdout.trim()) {
+      logInfo(`[executeShellCommand] stdout: ${truncateText(redactSensitiveText(stdout))}`);
+    }
+    if (stderr && stderr.trim()) {
+      logInfo(`[executeShellCommand] stderr: ${truncateText(redactSensitiveText(stderr))}`);
+    }
     return { stdout, stderr, success: true };
   } catch (error) {
     logError(`[executeShellCommand] Execution failed: ${error.message}`, error);
+    if (error.stdout && String(error.stdout).trim()) {
+      logError(`[executeShellCommand] stdout: ${truncateText(redactSensitiveText(error.stdout))}`);
+    }
+    if (error.stderr && String(error.stderr).trim()) {
+      logError(`[executeShellCommand] stderr: ${truncateText(redactSensitiveText(error.stderr))}`);
+    }
     return { 
       stdout: error.stdout || '', 
       stderr: error.stderr || '', 
@@ -271,7 +301,7 @@ app.post('/api/log-action', async (req, res) => {
     await fs.writeFile(filepath, message, 'utf8');
     await executeShellCommand(`chmod 777 "${filepath}"`);
 
-    console.log(`✓ Log file created: ${filename}`);
+    logInfo(`✓ Log file created: ${filename}`);
     
     res.json({
       success: true,
@@ -281,7 +311,7 @@ app.post('/api/log-action', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating log file:', error);
+    logError('Error creating log file:', error);
     res.status(500).json({ 
       error: 'Failed to create log file',
       details: error.message 
@@ -311,7 +341,7 @@ app.get('/api/logs', async (req, res) => {
     
     res.json({ logs });
   } catch (error) {
-    console.error('Error listing logs:', error);
+    logError('Error listing logs:', error);
     res.json({ logs: [] });
   }
 });
@@ -341,7 +371,7 @@ app.get('/api/logs/:filename', async (req, res) => {
       res.status(404).json({ error: 'Log file not found' });
     }
   } catch (error) {
-    console.error('Error reading log file:', error);
+    logError('Error reading log file:', error);
     res.status(500).json({ 
       error: 'Failed to read log file',
       details: error.message 
@@ -623,7 +653,7 @@ app.post('/api/restart-agent', async (req, res) => {
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
     return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
-    console.error('[ANSIBLE-RESTART] Failed:', error);
+    logError('[ANSIBLE-RESTART] Failed:', error);
     return res.status(500).json({ success: false, error: 'Restart failed', details: error.message });
   }
 });
@@ -692,7 +722,7 @@ app.post('/api/cleanup-temp', async (req, res) => {
     // Clean up old persistent RPM cache and temporary Ansible-related files
     const result = await executeShellCommand('find /tmp -name "zabbix_agent_download_*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null; find /tmp -name "ansible_*" -type d -mtime +1 -exec rm -rf {} + 2>/dev/null; echo "Cleanup completed"');
     
-    logInfo('Temp cleanup:', result.stdout);
+    logInfo(`Temp cleanup: ${truncateText(result.stdout)}`);
     
     res.json({
       success: true,
