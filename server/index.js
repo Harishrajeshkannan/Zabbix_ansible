@@ -25,6 +25,41 @@ const upload = multer({
   }
 });
 
+// ============= SIMPLE FILE + CONSOLE LOGGER =============
+const LOG_DIR = path.join(__dirname, 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'server.log');
+
+async function ensureLogDir() {
+  try {
+    await fs.mkdir(LOG_DIR, { recursive: true });
+  } catch (e) {
+    // ignore mkdir errors
+  }
+}
+
+async function writeServerLog(level, message) {
+  try {
+    await ensureLogDir();
+    const ts = new Date().toISOString();
+    const line = `${ts} [${level}] ${typeof message === 'string' ? message : JSON.stringify(message)}\n`;
+    await fs.appendFile(LOG_FILE, line);
+  } catch (e) {
+    // writing logs should not break the app
+    console.error('Failed to write server log:', e);
+  }
+}
+
+function logInfo(msg) {
+  console.log(msg);
+  void writeServerLog('INFO', msg);
+}
+
+function logError(msg, err) {
+  console.error(msg, err || '');
+  const errText = err ? (err.stack || err.message || JSON.stringify(err)) : '';
+  void writeServerLog('ERROR', `${msg} ${errText}`);
+}
+
 // ============= HELPER FUNCTIONS =============
 
 /**
@@ -33,9 +68,9 @@ const upload = multer({
 async function executeShellCommand(command, options = {}) {
   const { timeout = 180000, maxBuffer = 5 * 1024 * 1024, cwd, env } = options;
   
-  console.log(`[executeShellCommand] Received command: "${command}"`);
-  console.log(`[executeShellCommand] Command length: ${command.length}`);
-  console.log(`[executeShellCommand] Timeout: ${timeout}ms`);
+  logInfo(`[executeShellCommand] Received command: "${command}"`);
+  logInfo(`[executeShellCommand] Command length: ${command.length}`);
+  logInfo(`[executeShellCommand] Timeout: ${timeout}ms`);
   
   try {
     const { stdout, stderr } = await execAsync(command, {
@@ -46,10 +81,10 @@ async function executeShellCommand(command, options = {}) {
       shell: '/bin/bash'
     });
     
-    console.log(`[executeShellCommand] Execution successful`);
+    logInfo(`[executeShellCommand] Execution successful`);
     return { stdout, stderr, success: true };
   } catch (error) {
-    console.log(`[executeShellCommand] Execution failed: ${error.message}`);
+    logError(`[executeShellCommand] Execution failed: ${error.message}`, error);
     return { 
       stdout: error.stdout || '', 
       stderr: error.stderr || '', 
@@ -104,13 +139,13 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   }
 
   if (sshKeyFile) {
-    console.log(`[ANSIBLE] Using key-based authentication for user ${sshUser}`);
+    logInfo(`[ANSIBLE] Using key-based authentication for user ${sshUser}`);
   } else if (sshPassword) {
-    console.log(`[ANSIBLE] Using password-based authentication for user ${sshUser}`);
+    logInfo(`[ANSIBLE] Using password-based authentication for user ${sshUser}`);
   } else {
-    console.log(`[ANSIBLE] No password/key configured, relying on controller connection defaults for user ${sshUser}`);
+    logInfo(`[ANSIBLE] No password/key configured, relying on controller connection defaults for user ${sshUser}`);
   }
-  console.log(`[ANSIBLE] Running playbook ${playbookPath} on host ${host}`);
+  logInfo(`[ANSIBLE] Running playbook ${playbookPath} on host ${host}`);
   
   const envVars = {
     ...process.env,
@@ -484,13 +519,13 @@ app.get('/api/download-agent/:version', async (req, res) => {
     }
     
     // Download the package
-    console.log(`[DOWNLOAD] Downloading package...`);
+    logInfo(`[DOWNLOAD] Downloading package...`);
     
     const downloadCmd = `curl -f -L --progress-bar "${packageUrl}" -o "${downloadPath}"`;
     const downloadResult = await executeShellCommand(downloadCmd, { timeout: 300000 }); // 5 minutes
     
     if (!downloadResult.success) {
-      console.log(`[DOWNLOAD] ✗ Download failed`);
+      logError(`[DOWNLOAD] ✗ Download failed`, downloadResult.stderr || downloadResult.error);
       return res.status(500).json({
         error: 'Download failed',
         details: downloadResult.stderr || 'Failed to download package from repository',
@@ -502,7 +537,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
     const verifyResult = await executeShellCommand(`test -f "${downloadPath}" && stat -c%s "${downloadPath}" 2>/dev/null || stat -f%z "${downloadPath}"`);
     
     if (!verifyResult.success) {
-      console.log(`[DOWNLOAD] ✗ Downloaded file verification failed`);
+      logError(`[DOWNLOAD] ✗ Downloaded file verification failed`, verifyResult.stderr || verifyResult.error);
       return res.status(500).json({
         error: 'Download verification failed',
         details: 'File downloaded but could not be verified'
@@ -514,7 +549,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
     // Set permissions on downloaded RPM file
     await executeShellCommand(`chmod 755 "${downloadPath}"`);
     
-    console.log(`[DOWNLOAD] ✓ Downloaded successfully (${(fileSize / 1024 / 1024).toFixed(2)} MB)\n`);
+    logInfo(`[DOWNLOAD] ✓ Downloaded successfully (${(fileSize / 1024 / 1024).toFixed(2)} MB)\n`);
     
     res.json({
       success: true,
@@ -527,8 +562,8 @@ app.get('/api/download-agent/:version', async (req, res) => {
     });
     
   } catch (error) {
-    console.error(`[DOWNLOAD] ✗ Exception: ${error.message}\n`);
-    
+    logError(`[DOWNLOAD] ✗ Exception: ${error.message}\n`, error);
+
     res.status(500).json({
       error: 'Download failed',
       details: error.message
@@ -540,7 +575,7 @@ app.get('/api/download-agent/:version', async (req, res) => {
  * Install Zabbix agent on remote RHEL server via Ansible
  */
 app.post('/api/install-remote', async (req, res) => {
-  console.log('\n[ANSIBLE-INSTALL] /api/install-remote endpoint HIT!');
+  logInfo('\n[ANSIBLE-INSTALL] /api/install-remote endpoint HIT!');
   try {
     const host = resolveTargetHost(req.body || {});
     const { version, serverIP, serverPort = 10051, listenerPort = 10050, hostname } = req.body;
@@ -567,7 +602,7 @@ app.post('/api/install-remote', async (req, res) => {
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
     return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
-    console.error('[ANSIBLE-INSTALL] Failed:', error);
+    logError('[ANSIBLE-INSTALL] Failed:', error);
     return res.status(500).json({ success: false, error: 'Installation failed', details: error.message });
   }
 });
@@ -640,7 +675,7 @@ app.get('/api/system-info', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error getting system info:', error);
+    logError('Error getting system info:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to get system information',
@@ -657,14 +692,14 @@ app.post('/api/cleanup-temp', async (req, res) => {
     // Clean up old persistent RPM cache and temporary Ansible-related files
     const result = await executeShellCommand('find /tmp -name "zabbix_agent_download_*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null; find /tmp -name "ansible_*" -type d -mtime +1 -exec rm -rf {} + 2>/dev/null; echo "Cleanup completed"');
     
-    console.log('Temp cleanup:', result.stdout);
+    logInfo('Temp cleanup:', result.stdout);
     
     res.json({
       success: true,
       message: result.stdout.trim()
     });
   } catch (error) {
-    console.error('Error during cleanup:', error);
+    logError('Error during cleanup:', error);
     res.status(500).json({
       error: 'Cleanup failed',
       details: error.message
@@ -727,24 +762,24 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
 app.listen(PORT, async () => {
   const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
   
-  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`🐧 Platform: RHEL-based Linux`);  
-  console.log(`🔐 Env source: ${ENV_PATH}`);
-  console.log(`🔐 Ansible playbook command: ${ANSIBLE_PLAYBOOK_CMD}`);
-  console.log(`📁 Logs directory: ${LOGS_DIR}`);
-  console.log(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
-  console.log(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
-  console.log();
+  logInfo(`\n🚀 Backend server running on http://localhost:${PORT}`);
+  logInfo(`🐧 Platform: RHEL-based Linux`);  
+  logInfo(`🔐 Env source: ${ENV_PATH}`);
+  logInfo(`🔐 Ansible playbook command: ${ANSIBLE_PLAYBOOK_CMD}`);
+  logInfo(`📁 Logs directory: ${LOG_DIR}`);
+  logInfo(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
+  logInfo(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
+  logInfo('');
   
   // Test /tmp/ write access
   const testLog = `/tmp/backend_test_${Date.now()}.log`;
   try {
     await fs.writeFile(testLog, `Backend started at ${new Date().toISOString()}\n`);
     await executeShellCommand(`chmod 777 ${testLog}`);
-    console.log(`✅ /tmp/ directory is writable (test file: ${testLog})`);
+    logInfo(`✅ /tmp/ directory is writable (test file: ${testLog})`);
   } catch (err) {
-    console.error(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`);
+    logError(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`, err);
   }
   
-  console.log('✨ Backend ready to accept Ansible remote installation requests\n');
+  logInfo('✨ Backend ready to accept Ansible remote installation requests\n');
 });
