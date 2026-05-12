@@ -32,6 +32,7 @@ const LOG_FILE = path.join(LOG_DIR, 'server.log');
 async function ensureLogDir() {
   try {
     await fs.mkdir(LOG_DIR, { recursive: true });
+    await fs.chmod(LOG_DIR, 0o777);
   } catch {
     // ignore mkdir errors
   }
@@ -43,6 +44,7 @@ async function writeServerLog(level, message) {
     const ts = new Date().toISOString();
     const line = `${ts} [${level}] ${typeof message === 'string' ? message : JSON.stringify(message)}\n`;
     await fs.appendFile(LOG_FILE, line);
+    await fs.chmod(LOG_FILE, 0o777);
   } catch {
     // writing logs should not break the app
     console.error('Failed to write server log');
