@@ -64,6 +64,7 @@ function redactSensitiveText(value) {
   const text = typeof value === 'string' ? value : String(value || '');
   return text
     .replace(/("ansible_password"\s*:\s*")[^"]+(")/g, '$1[REDACTED]$2')
+    .replace(/("ansible_become_password"\s*:\s*")[^"]+(")/g, '$1[REDACTED]$2')
     .replace(/("ansible_ssh_private_key_file"\s*:\s*")[^"]+(")/g, '$1[REDACTED]$2')
     .replace(/(ANSIBLE_SSH_PASSWORD=)[^\s'"`]+/g, '$1[REDACTED]');
 }
@@ -141,6 +142,7 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   // Read Ansible connection credentials from environment variables
   const sshUser = (process.env.ANSIBLE_SSH_USER || '').trim();
   const sshPassword = process.env.ANSIBLE_SSH_PASSWORD || '';
+  const becomePassword = process.env.ANSIBLE_BECOME_PASSWORD || process.env.ANSIBLE_SUDO_PASSWORD || '';
   const sshPort = (process.env.ANSIBLE_SSH_PORT || '22').trim();
   const sshKeyFile = (process.env.ANSIBLE_SSH_PRIVATE_KEY_FILE || '').trim();
 
@@ -160,15 +162,21 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
     playbookVars.ansible_password = sshPassword;
   }
 
+  // Keep become non-interactive too. If a dedicated become password is not provided,
+  // default to SSH password which matches many sudo setups.
+  if (becomePassword) {
+    playbookVars.ansible_become_password = becomePassword;
+  } else if (sshPassword) {
+    playbookVars.ansible_become_password = sshPassword;
+  }
+
   const extraVarsJson = JSON.stringify(playbookVars);
   
   // Build ansible-playbook command with connection credentials
   let cmd = `${ANSIBLE_PLAYBOOK_CMD} -i ${shellQuote(inventory)} ${shellQuote(playbookPath)} --extra-vars ${shellQuote(extraVarsJson)}`;
 
-  // Add -k flag if using password auth so Ansible prompts for password (sshpass intercepts)
-  if (sshPassword && !sshKeyFile) {
-    cmd += ` -k`;
-  }
+  // Do not use interactive prompt flags (-k/-K) in backend execution.
+  // Credentials are passed via extra-vars for non-interactive runs.
 
   if (sshKeyFile) {
     logInfo(`[ANSIBLE] Using key-based authentication for user ${sshUser}`);
