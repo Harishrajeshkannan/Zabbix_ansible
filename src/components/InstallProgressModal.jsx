@@ -25,18 +25,25 @@ const InstallProgressModal = ({ isOpen, requestId, onClose, backendApiUrl }) => 
         const data = await res.json();
         if (!data || !data.success) return;
 
-        setStatus(data.status || 'in-progress');
-        const newProgress = {};
-        (data.steps || []).forEach(s => { newProgress[s.id] = s.status; });
-        setProgress(newProgress);
+          setStatus(data.status || 'in-progress');
+          const newProgress = {};
+          (data.steps || []).forEach(s => { newProgress[s.id] = s.status; });
 
-        if (data.status === 'completed' || data.status === 'failed') {
-          // stop polling and auto-close shortly
-          if (pollRef.current) clearInterval(pollRef.current);
-          setTimeout(() => {
-            onClose && onClose();
-          }, 900);
-        }
+          // if backend hasn't reported any steps yet, assume first step started
+          if (Object.keys(newProgress).length === 0 && data.status === 'in-progress') {
+            newProgress[INSTALLATION_STEPS[0].id] = 'in-progress';
+          }
+
+          setProgress(newProgress);
+
+          // Only auto-close when all known steps are completed
+          const allCompleted = INSTALLATION_STEPS.every(step => newProgress[step.id] === 'completed');
+          if (allCompleted) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setTimeout(() => {
+              onClose && onClose();
+            }, 900);
+          }
       } catch (e) {
         // ignore polling errors
       }
