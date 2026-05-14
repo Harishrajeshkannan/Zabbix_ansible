@@ -298,13 +298,15 @@ function classifyAnsibleFailureStatus(stderr = '', fallback = 500) {
 
 function detectAnsibleFailureReason(text = '') {
   const msg = String(text || '').toLowerCase();
+  if (msg.includes('unreachable! =>') || msg.includes(': unreachable!')) return 'host_unreachable';
   if (msg.includes('permission denied')) return 'ssh_auth_failed';
-  if (msg.includes('unreachable')) return 'host_unreachable';
   if (msg.includes('connection timed out')) return 'ssh_connection_timeout';
   if (msg.includes('no route to host')) return 'network_no_route';
   if (msg.includes('connection refused')) return 'ssh_connection_refused';
   if (msg.includes('could not resolve hostname')) return 'dns_resolution_failed';
   if (msg.includes('sudo') && msg.includes('password')) return 'sudo_become_failed';
+  if (msg.includes('space separated string of packages')) return 'invalid_package_argument';
+  if (msg.includes('failed to validate gpg signature') || msg.includes('public key for')) return 'repo_gpg_validation_failed';
   if (msg.includes('failed!') || msg.includes('fatal:')) return 'ansible_task_failed';
   return 'unknown';
 }
