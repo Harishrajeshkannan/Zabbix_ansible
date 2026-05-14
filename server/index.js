@@ -897,83 +897,85 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
  */
 app.get('/api/install-progress/:requestId', async (req, res) => {
   const { requestId } = req.params;
-  const { since = '0' } = req.query; // line number to start from
   
   try {
-    const sinceLineNum = parseInt(since, 10) || 0;
-    
     // Read the server log file
     const logContent = await fs.readFile(LOG_FILE, 'utf-8').catch(() => '');
     const lines = logContent.split('\n');
     
-    // Filter lines for this requestId and those after the 'since' line
-    const filteredLines = lines
-      .slice(sinceLineNum)
-      .filter(line => line.includes(`[req:${requestId}]`));
+    // Filter lines for this requestId
+    const relevantLines = lines.filter(line => line.includes(`[req:${requestId}]`));
     
-    // Extract progress information from log lines
-    const progressEntries = filteredLines.map(line => {
-      const match = line.match(/\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\]\s+\[([A-Z]+)\]\s+(.+)/);
-      if (!match) return null;
-      
-      const [, timestamp, level, message] = match;
-      
-      // Parse step from message
-      let step = null;
-      let status = null;
-      
-      if (message.includes('Gathering Facts')) {
-        step = 'Gathering Facts';
-        status = message.includes('ok:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Validate required')) {
-        step = 'Validating Inputs';
-        status = message.includes('ok:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Validate semantic')) {
-        step = 'Validating Version';
-        status = message.includes('ok:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Derive version')) {
-        step = 'Deriving Configuration';
-        status = message.includes('ok:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Query repository')) {
-        step = 'Querying Repository';
-        status = message.includes('ok:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Validate zabbix-agent2')) {
-        step = 'Validating Agent Package';
-        status = message.includes('ok:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Install Zabbix Agent 2')) {
-        step = 'Installing Agent Package';
-        status = message.includes('ok:') || message.includes('changed:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Deploy zabbix_agent2')) {
-        step = 'Configuring Agent';
-        status = message.includes('ok:') || message.includes('changed:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Ensure Zabbix Agent')) {
-        step = 'Starting Service';
-        status = message.includes('ok:') || message.includes('changed:') ? 'completed' : 'in-progress';
-      } else if (message.includes('Playbook succeeded')) {
-        step = 'Installation Complete';
-        status = 'completed';
-      } else if (message.includes('Playbook failed')) {
-        step = 'Installation Failed';
-        status = 'failed';
+    // Map Ansible tasks to the 4 key progress steps
+    const steps = {
+      'downloading-repo': { label: 'Downloading repository', status: null },
+      'installing-package': { label: 'Installing package', status: null },
+      'configuring-agent': { label: 'Configuring agent', status: null },
+      'starting-service': { label: 'Starting service', status: null }
+    };
+    
+    relevantLines.forEach(line => {
+      // Detect step completion from Ansible task messages
+      if (line.includes('Query repository') || line.includes('Validating') || line.includes('Derive')) {
+        steps['downloading-repo'].status = 'in-progress';
+      }
+      if (line.includes('Query repository') && line.includes('ok:')) {
+        steps['downloading-repo'].status = 'completed';
       }
       
-      return step ? { timestamp, level, step, status, message } : null;
-    }).filter(Boolean);
+      if (line.includes('Install Zabbix Agent 2 package')) {
+        steps['installing-package'].status = 'in-progress';
+      }
+      if (line.includes('Install Zabbix Agent 2 package') && (line.includes('ok:') || line.includes('changed:'))) {
+        steps['installing-package'].status = 'completed';
+      }
+      
+      if (line.includes('Deploy zabbix_agent2 configuration')) {
+        steps['configuring-agent'].status = 'in-progress';
+      }
+      if (line.includes('Deploy zabbix_agent2 configuration') && (line.includes('ok:') || line.includes('changed:'))) {
+        steps['configuring-agent'].status = 'completed';
+      }
+      
+      if (line.includes('Ensure Zabbix Agent service')) {
+        steps['starting-service'].status = 'in-progress';
+      }
+      if (line.includes('Ensure Zabbix Agent service') && (line.includes('ok:') || line.includes('changed:'))) {
+        steps['starting-service'].status = 'completed';
+      }
+    });
     
     // Determine overall status
     let overallStatus = 'in-progress';
-    if (filteredLines.some(l => l.includes('Playbook succeeded'))) {
+    if (relevantLines.some(l => l.includes('Playbook succeeded'))) {
       overallStatus = 'completed';
-    } else if (filteredLines.some(l => l.includes('Playbook failed'))) {
+    } else if (relevantLines.some(l => l.includes('Playbook failed'))) {
       overallStatus = 'failed';
     }
+    
+    // Get error message if failed
+    let errorMessage = null;
+    if (overallStatus === 'failed') {
+      const failedLine = relevantLines.find(l => l.includes('FAILED') || l.includes('fatal:'));
+      if (failedLine) {
+        const match = failedLine.match(/\] (.+)$/);
+        errorMessage = match ? match[1] : 'Installation failed';
+      }
+    }
+    
+    // Convert to array format
+    const progressArray = Object.entries(steps).map(([key, value]) => ({
+      id: key,
+      label: value.label,
+      status: value.status
+    }));
     
     res.json({
       success: true,
       requestId,
       status: overallStatus,
-      progress: progressEntries,
-      nextSince: lines.length
+      steps: progressArray,
+      error: errorMessage
     });
   } catch (error) {
     logError(`Error reading progress for ${requestId}:`, error);

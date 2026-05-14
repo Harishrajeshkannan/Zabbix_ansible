@@ -1,92 +1,81 @@
+.progress-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
 .progress-modal {
   width: 90%;
-  max-width: 600px;
-  max-height: 85vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
+  max-width: 500px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
 }
 
 .progress-container {
-  flex: 1;
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.installation-details {
-  background: #f5f5f5;
-  padding: 12px;
-  border-radius: 4px;
-  margin-bottom: 20px;
-  font-size: 14px;
-}
-
-.installation-details p {
-  margin: 6px 0;
+  padding: 0;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
 }
 
-.installation-details code {
-  background: #e0e0e0;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: monospace;
-  font-size: 12px;
-  word-break: break-all;
+.progress-header {
+  padding: 24px 24px 12px;
+  text-align: center;
 }
 
-.steps-container {
-  margin-bottom: 20px;
-}
-
-.steps-container h3 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
+.progress-header h2 {
+  margin: 0 0 6px 0;
+  font-size: 20px;
+  font-weight: 600;
   color: #333;
 }
 
-.steps-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.progress-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #666;
 }
 
-.step {
+.steps-list {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  background: #fafafa;
+  padding: 12px 14px;
+  background: #f5f5f5;
   border-left: 3px solid #ddd;
   border-radius: 4px;
   transition: all 0.3s ease;
 }
 
-.step.in-progress {
+.step-item.in-progress {
   background: #e3f2fd;
   border-left-color: #2196f3;
 }
 
-.step.completed {
+.step-item.completed {
   background: #e8f5e9;
   border-left-color: #4caf50;
 }
 
-.step.failed {
-  background: #ffebee;
-  border-left-color: #f44336;
-}
-
 .step-icon {
-  min-width: 24px;
-  width: 24px;
-  height: 24px;
+  min-width: 26px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
   font-size: 16px;
+  flex-shrink: 0;
 }
 
 .step-icon .icon {
@@ -95,6 +84,7 @@
 
 .step-icon .spinner {
   animation: spin 1s linear infinite;
+  color: #2196f3;
 }
 
 @keyframes spin {
@@ -106,16 +96,8 @@
   }
 }
 
-.step-icon .icon.spinner {
-  color: #2196f3;
-}
-
-.step.completed .icon {
+.step-item.completed .icon {
   color: #4caf50;
-}
-
-.step.failed .icon {
-  color: #f44336;
 }
 
 .step-label {
@@ -124,138 +106,62 @@
   font-size: 14px;
 }
 
-.logs-container {
-  margin-bottom: 20px;
-}
-
-.logs-container h3 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
-  color: #333;
-}
-
-.logs-list {
-  background: #1e1e1e;
-  border-radius: 4px;
-  overflow: hidden;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.log-entry {
-  padding: 8px 12px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  color: #a0a0a0;
-  border-bottom: 1px solid #333;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.log-entry:last-child {
-  border-bottom: none;
-}
-
-.log-entry.info {
-  color: #7fdbca;
-}
-
-.log-entry.error {
-  color: #ff7875;
-}
-
-.log-entry.warning {
-  color: #ffd566;
-}
-
-.log-time {
-  color: #666;
-  flex-shrink: 0;
-  min-width: 80px;
-}
-
-.log-step {
-  color: #89d4f9;
-  flex-grow: 1;
-  word-break: break-word;
-}
-
-.log-status {
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: bold;
-  flex-shrink: 0;
-}
-
-.log-status.completed {
-  background: #4caf50;
-  color: white;
-}
-
-.log-status.in-progress {
-  background: #2196f3;
-  color: white;
-}
-
-.log-status.failed {
-  background: #f44336;
-  color: white;
-}
-
-.error-container {
+.error-box {
+  margin: 16px 24px;
+  padding: 12px;
   background: #ffebee;
   border: 1px solid #f44336;
   border-radius: 4px;
-  padding: 12px;
-  margin-bottom: 20px;
 }
 
-.error-container h3 {
-  margin: 0 0 8px 0;
-  color: #c62828;
-  font-size: 14px;
-}
-
-.error-message {
+.error-box p {
   margin: 0;
   color: #d32f2f;
   font-size: 13px;
   word-break: break-word;
 }
 
-.success-message {
+.success-box {
+  margin: 16px 24px;
+  padding: 14px;
   background: #e8f5e9;
   border: 1px solid #4caf50;
   border-radius: 4px;
-  padding: 12px;
   text-align: center;
-  color: #2e7d32;
-  font-weight: 500;
 }
 
-.failed-message {
+.success-box p {
+  margin: 0;
+  color: #2e7d32;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.failed-box {
+  margin: 16px 24px;
+  padding: 14px;
   background: #ffebee;
   border: 1px solid #f44336;
   border-radius: 4px;
-  padding: 12px;
   text-align: center;
+}
+
+.failed-box p {
+  margin: 0;
   color: #c62828;
   font-weight: 500;
+  font-size: 14px;
 }
 
 .modal-actions {
-  padding: 16px 20px;
-  border-top: 1px solid #ddd;
+  padding: 16px 24px 24px;
   display: flex;
   gap: 10px;
-  justify-content: flex-end;
-  background: #fafafa;
+  justify-content: center;
 }
 
 .btn-close {
-  padding: 8px 16px;
+  padding: 10px 24px;
   background: #2196f3;
   color: white;
   border: none;
@@ -272,22 +178,4 @@
 
 .btn-close:active {
   background: #1565c0;
-}
-
-/* Scrollbar styling for logs */
-.logs-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.logs-list::-webkit-scrollbar-track {
-  background: #333;
-}
-
-.logs-list::-webkit-scrollbar-thumb {
-  background: #666;
-  border-radius: 3px;
-}
-
-.logs-list::-webkit-scrollbar-thumb:hover {
-  background: #888;
 }
