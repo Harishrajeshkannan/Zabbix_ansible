@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import process from 'process';
@@ -69,6 +70,28 @@ function redactSensitiveText(value) {
     .replace(/(ANSIBLE_SSH_PASSWORD=)[^\s'"`]+/g, '$1[REDACTED]');
 }
 
+function buildRequestPrefix(requestId) {
+  return requestId ? `[req:${requestId}] ` : '';
+}
+
+function summarizeBody(body) {
+  if (!body || typeof body !== 'object') {
+    return '{}';
+  }
+
+  const summary = {
+    host: body.host,
+    hostname: body.hostname,
+    version: body.version,
+    serverIP: body.serverIP,
+    serverPort: body.serverPort,
+    listenerPort: body.listenerPort,
+    action: body.action
+  };
+
+  return truncateText(redactSensitiveText(JSON.stringify(summary)), 600);
+}
+
 function logInfo(msg) {
   console.log(msg);
   void writeServerLog('INFO', msg);
@@ -86,12 +109,14 @@ function logError(msg, err) {
  * Execute shell command with proper error handling
  */
 async function executeShellCommand(command, options = {}) {
-  const { timeout = 180000, maxBuffer = 5 * 1024 * 1024, cwd, env } = options;
+  const { timeout = 180000, maxBuffer = 5 * 1024 * 1024, cwd, env, label = 'shell', requestId = '' } = options;
   const redactedCommand = redactSensitiveText(command);
+  const startedAt = Date.now();
+  const reqPrefix = buildRequestPrefix(requestId);
   
-  logInfo(`[executeShellCommand] Received command: "${redactedCommand}"`);
-  logInfo(`[executeShellCommand] Command length: ${command.length}`);
-  logInfo(`[executeShellCommand] Timeout: ${timeout}ms`);
+  logInfo(`${reqPrefix}[executeShellCommand] [${label}] Received command: "${redactedCommand}"`);
+  logInfo(`${reqPrefix}[executeShellCommand] [${label}] Command length: ${command.length}`);
+  logInfo(`${reqPrefix}[executeShellCommand] [${label}] Timeout: ${timeout}ms`);
   
   try {
     const { stdout, stderr } = await execAsync(command, {
@@ -101,28 +126,35 @@ async function executeShellCommand(command, options = {}) {
       env,
       shell: '/bin/bash'
     });
+    const durationMs = Date.now() - startedAt;
     
-    logInfo(`[executeShellCommand] Execution successful`);
+    logInfo(`${reqPrefix}[executeShellCommand] [${label}] Execution successful (exitCode=0 durationMs=${durationMs})`);
     if (stdout && stdout.trim()) {
-      logInfo(`[executeShellCommand] stdout: ${truncateText(redactSensitiveText(stdout))}`);
+      logInfo(`${reqPrefix}[executeShellCommand] [${label}] stdout: ${truncateText(redactSensitiveText(stdout))}`);
     }
     if (stderr && stderr.trim()) {
-      logInfo(`[executeShellCommand] stderr: ${truncateText(redactSensitiveText(stderr))}`);
+      logInfo(`${reqPrefix}[executeShellCommand] [${label}] stderr: ${truncateText(redactSensitiveText(stderr))}`);
     }
-    return { stdout, stderr, success: true };
+    return { stdout, stderr, success: true, exitCode: 0, durationMs };
   } catch (error) {
-    logError(`[executeShellCommand] Execution failed: ${error.message}`, error);
+    const durationMs = Date.now() - startedAt;
+    const exitCode = typeof error.code === 'number' ? error.code : null;
+    const signal = error.signal || '';
+    logError(`${reqPrefix}[executeShellCommand] [${label}] Execution failed (exitCode=${exitCode ?? 'unknown'} signal=${signal || 'none'} durationMs=${durationMs}): ${error.message}`, error);
     if (error.stdout && String(error.stdout).trim()) {
-      logError(`[executeShellCommand] stdout: ${truncateText(redactSensitiveText(error.stdout))}`);
+      logError(`${reqPrefix}[executeShellCommand] [${label}] stdout: ${truncateText(redactSensitiveText(error.stdout))}`);
     }
     if (error.stderr && String(error.stderr).trim()) {
-      logError(`[executeShellCommand] stderr: ${truncateText(redactSensitiveText(error.stderr))}`);
+      logError(`${reqPrefix}[executeShellCommand] [${label}] stderr: ${truncateText(redactSensitiveText(error.stderr))}`);
     }
     return { 
       stdout: error.stdout || '', 
       stderr: error.stderr || '', 
       success: false, 
-      error: error.message 
+      error: error.message,
+      exitCode,
+      signal,
+      durationMs
     };
   }
 }
@@ -133,7 +165,9 @@ async function executeShellCommand(command, options = {}) {
  * Uses a one-host inline inventory so the controller runs the tasks on `host`.
  * Ansible connection credentials are read from environment variables for authentication.
  */
-async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
+async function runAnsiblePlaybook(playbookPath, host, extraVars = {}, context = {}) {
+  const { requestId = '' } = context;
+  const reqPrefix = buildRequestPrefix(requestId);
   const ansibleRoot = path.resolve(__dirname, '../ansible');
   const ansibleConfigPath = path.join(ansibleRoot, 'ansible.cfg');
   const inventory = `${host},`;
@@ -179,13 +213,14 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   // Credentials are passed via extra-vars for non-interactive runs.
 
   if (sshKeyFile) {
-    logInfo(`[ANSIBLE] Using key-based authentication for user ${sshUser}`);
+    logInfo(`${reqPrefix}[ANSIBLE] Using key-based authentication for user ${sshUser}`);
   } else if (sshPassword) {
-    logInfo(`[ANSIBLE] Using password-based authentication for user ${sshUser}`);
+    logInfo(`${reqPrefix}[ANSIBLE] Using password-based authentication for user ${sshUser}`);
   } else {
-    logInfo(`[ANSIBLE] No password/key configured, relying on controller connection defaults for user ${sshUser}`);
+    logInfo(`${reqPrefix}[ANSIBLE] No password/key configured, relying on controller connection defaults for user ${sshUser}`);
   }
-  logInfo(`[ANSIBLE] Running playbook ${playbookPath} on host ${host}`);
+  logInfo(`${reqPrefix}[ANSIBLE] Running playbook ${playbookPath} on host ${host}`);
+  logInfo(`${reqPrefix}[ANSIBLE] Context summary host=${host} version=${extraVars.version || 'n/a'} serverIP=${extraVars.serverIP || 'n/a'} serverPort=${extraVars.serverPort || 'n/a'} listenerPort=${extraVars.listenerPort || 'n/a'}`);
   
   const envVars = {
     ...process.env,
@@ -196,9 +231,20 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   const result = await executeShellCommand(cmd, {
     timeout: 10 * 60 * 1000,
     maxBuffer: 10 * 1024 * 1024,
+    label: 'ansible-playbook',
+    requestId,
     cwd: ansibleRoot,
     env: envVars
   });
+
+  if (!result.success) {
+    const failureText = `${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`;
+    const reason = detectAnsibleFailureReason(failureText);
+    logError(`${reqPrefix}[ANSIBLE] Playbook failed reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
+  } else {
+    logInfo(`${reqPrefix}[ANSIBLE] Playbook succeeded durationMs=${result.durationMs ?? 'unknown'}`);
+  }
+
   return result;
 }
 
@@ -250,6 +296,19 @@ function classifyAnsibleFailureStatus(stderr = '', fallback = 500) {
   return fallback;
 }
 
+function detectAnsibleFailureReason(text = '') {
+  const msg = String(text || '').toLowerCase();
+  if (msg.includes('permission denied')) return 'ssh_auth_failed';
+  if (msg.includes('unreachable')) return 'host_unreachable';
+  if (msg.includes('connection timed out')) return 'ssh_connection_timeout';
+  if (msg.includes('no route to host')) return 'network_no_route';
+  if (msg.includes('connection refused')) return 'ssh_connection_refused';
+  if (msg.includes('could not resolve hostname')) return 'dns_resolution_failed';
+  if (msg.includes('sudo') && msg.includes('password')) return 'sudo_become_failed';
+  if (msg.includes('failed!') || msg.includes('fatal:')) return 'ansible_task_failed';
+  return 'unknown';
+}
+
 // ============= END HELPER FUNCTIONS =============
 
 const app = express();
@@ -258,6 +317,24 @@ const PORT = 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+app.use((req, res, next) => {
+  const requestId = req.headers['x-request-id'] ? String(req.headers['x-request-id']).slice(0, 120) : randomUUID();
+  const startedAt = Date.now();
+  const reqPrefix = buildRequestPrefix(requestId);
+
+  req.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+
+  logInfo(`${reqPrefix}[HTTP] --> ${req.method} ${req.originalUrl} ip=${req.ip || 'unknown'} body=${summarizeBody(req.body)}`);
+
+  res.on('finish', () => {
+    const durationMs = Date.now() - startedAt;
+    logInfo(`${reqPrefix}[HTTP] <-- ${req.method} ${req.originalUrl} status=${res.statusCode} durationMs=${durationMs}`);
+  });
+
+  next();
+});
 
 // Logs directory - create in project root
 const LOGS_DIR = path.join(__dirname, 'agent-logs');
@@ -615,7 +692,10 @@ app.get('/api/download-agent/:version', async (req, res) => {
  * Install Zabbix agent on remote RHEL server via Ansible
  */
 app.post('/api/install-remote', async (req, res) => {
-  logInfo('\n[ANSIBLE-INSTALL] /api/install-remote endpoint HIT!');
+  const requestId = req.requestId || '';
+  const reqPrefix = buildRequestPrefix(requestId);
+  logInfo(`\n${reqPrefix}[ANSIBLE-INSTALL] /api/install-remote endpoint HIT!`);
+  logInfo(`${reqPrefix}[ANSIBLE-INSTALL] Payload summary: ${summarizeBody(req.body)}`);
   try {
     const host = resolveTargetHost(req.body || {});
     const { version, serverIP, serverPort = 10051, listenerPort = 10050, hostname } = req.body;
@@ -633,16 +713,19 @@ app.post('/api/install-remote', async (req, res) => {
     const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
     const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
 
-    const result = await runAnsiblePlaybook(playbookPath, host, extraVars);
+    const result = await runAnsiblePlaybook(playbookPath, host, extraVars, { requestId });
 
     if (result.success) {
+      logInfo(`${reqPrefix}[ANSIBLE-INSTALL] Completed successfully for host=${host} durationMs=${result.durationMs ?? 'unknown'}`);
       return res.json({ success: true, message: `Ansible playbook ran for ${host}`, output: result.stdout });
     }
 
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+    const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
+    logError(`${reqPrefix}[ANSIBLE-INSTALL] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
     return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
-    logError('[ANSIBLE-INSTALL] Failed:', error);
+    logError(`${reqPrefix}[ANSIBLE-INSTALL] Failed with exception:`, error);
     return res.status(500).json({ success: false, error: 'Installation failed', details: error.message });
   }
 });
@@ -651,19 +734,25 @@ app.post('/api/install-remote', async (req, res) => {
  * Restart Zabbix agent service on a remote host via Ansible
  */
 app.post('/api/restart-agent', async (req, res) => {
+  const requestId = req.requestId || '';
+  const reqPrefix = buildRequestPrefix(requestId);
   try {
     const host = resolveTargetHost(req.body || {});
     const playbookPath = path.resolve(__dirname, '../ansible/playbooks/restart.yml');
-    const result = await runAnsiblePlaybook(playbookPath, host, { host });
+    logInfo(`${reqPrefix}[ANSIBLE-RESTART] /api/restart-agent endpoint HIT host=${host}`);
+    const result = await runAnsiblePlaybook(playbookPath, host, { host }, { requestId });
 
     if (result.success) {
+      logInfo(`${reqPrefix}[ANSIBLE-RESTART] Completed successfully for host=${host} durationMs=${result.durationMs ?? 'unknown'}`);
       return res.json({ success: true, message: `Restart playbook ran for ${host}`, output: result.stdout });
     }
 
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+    const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
+    logError(`${reqPrefix}[ANSIBLE-RESTART] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
     return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
-    logError('[ANSIBLE-RESTART] Failed:', error);
+    logError(`${reqPrefix}[ANSIBLE-RESTART] Failed with exception:`, error);
     return res.status(500).json({ success: false, error: 'Restart failed', details: error.message });
   }
 });
