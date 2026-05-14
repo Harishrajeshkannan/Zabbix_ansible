@@ -209,6 +209,139 @@
   margin: 4px 0;
 }
 
+.install-progress-card {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+
+.install-progress-card.completed {
+  border-color: #86efac;
+  background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+.install-progress-card.failed {
+  border-color: #fca5a5;
+  background: linear-gradient(180deg, #fff1f2 0%, #fee2e2 100%);
+}
+
+.install-progress-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.install-progress-kicker {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 700;
+}
+
+.install-progress-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.install-progress-percent {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.install-progress-message {
+  font-size: 12px;
+  color: #334155;
+  margin-bottom: 10px;
+}
+
+.install-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.install-progress-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0a466a 0%, #2563eb 100%);
+  transition: width 0.25s ease;
+}
+
+.install-progress-card.completed .install-progress-bar-fill {
+  background: linear-gradient(90deg, #15803d 0%, #22c55e 100%);
+}
+
+.install-progress-card.failed .install-progress-bar-fill {
+  background: linear-gradient(90deg, #b91c1c 0%, #ef4444 100%);
+}
+
+.install-progress-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.install-progress-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(203, 213, 225, 0.8);
+}
+
+.install-progress-step .step-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 4px;
+  background: #cbd5e1;
+  flex: 0 0 auto;
+}
+
+.install-progress-step.done .step-status-dot {
+  background: #22c55e;
+}
+
+.install-progress-step.running .step-status-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+}
+
+.install-progress-step.failed .step-status-dot {
+  background: #ef4444;
+}
+
+.step-body {
+  min-width: 0;
+}
+
+.step-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.step-detail {
+  font-size: 11px;
+  color: #475569;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;

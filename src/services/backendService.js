@@ -135,9 +135,6 @@ export const installRemoteAgent = async (installData) => {
   console.log('[backendService] Backend URL:', BACKEND_API_URL);
   
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout
-
     console.log('[backendService] Making POST request to:', `${BACKEND_API_URL}/install-remote`);
     
     const response = await fetch(`${BACKEND_API_URL}/install-remote`, {
@@ -146,20 +143,18 @@ export const installRemoteAgent = async (installData) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(installData),
-      signal: controller.signal,
     });
 
     console.log('[backendService] Response status:', response.status);
     console.log('[backendService] Response ok:', response.ok);
-    
-    clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Installation failed' }));
-      throw new Error(errorData.details || errorData.error || 'Installation failed');
+    const data = await parseApiResponse(response);
+
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || 'Installation failed';
+      throw new Error(details);
     }
 
-    const data = await response.json();
     console.log('Remote installation completed:', data);
     return data;
   } catch (error) {
@@ -167,6 +162,30 @@ export const installRemoteAgent = async (installData) => {
     if (error.name === 'AbortError') {
       throw new Error('Installation timeout - The installation is taking too long. Please check controller connectivity and server resources.');
     }
+    throw error;
+  }
+};
+
+/**
+ * Poll the status of an async remote install job
+ * @param {string} requestId - Job request id returned by installRemoteAgent
+ * @returns {Promise<Object>} Response from backend
+ */
+export const getInstallRemoteStatus = async (requestId) => {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/install-remote/status/${encodeURIComponent(requestId)}`, {
+      method: 'GET',
+    });
+
+    const data = await parseApiResponse(response);
+    if (!response.ok || !data?.success) {
+      const details = data?.details || data?.error || data?.rawResponse || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Failed to fetch install job status:', error);
     throw error;
   }
 };

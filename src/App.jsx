@@ -12,7 +12,7 @@ import LocalInstallModal from './components/LocalInstallModal';
 import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
-import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent, getInstallRemoteStatus, restartRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -314,7 +314,7 @@ function App() {
     setLocalInstallModalOpen(true);
   };
 
-  const handleLocalInstall = async (installData) => {
+  const handleLocalInstall = async (installData, progressApi = {}) => {
     const action = actionType || 'install';
     const isMixedAction = action === 'install-update';
     const actionVerb = isMixedAction
@@ -332,10 +332,73 @@ function App() {
       throw new Error('No host selected');
     }
 
+    const updateProgress = (patch) => {
+      if (typeof progressApi.update === 'function') {
+        progressApi.update(patch);
+      }
+    };
+
+    const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const waitForInstallJob = async (requestId, host, index, total) => {
+      updateProgress({
+        phase: 'running',
+        status: 'running',
+        percent: 5,
+        message: `Waiting for job status for ${host.hostname}`,
+        currentHost: host.hostname,
+        hostIndex: index + 1,
+        totalHosts: total
+      });
+
+      while (true) {
+        const statusResponse = await getInstallRemoteStatus(requestId);
+        const job = statusResponse.job || {};
+
+        updateProgress({
+          ...job,
+          currentHost: host.hostname,
+          hostIndex: index + 1,
+          totalHosts: total,
+          message: job.message || `Installing on ${host.hostname}`
+        });
+
+        if (job.status === 'completed') {
+          return job;
+        }
+
+        if (job.status === 'failed') {
+          throw new Error(job.error || job.message || `Installation failed on ${host.hostname}`);
+        }
+
+        await delay(1500);
+      }
+    };
+
+    updateProgress({
+      status: 'starting',
+      phase: 'starting',
+      percent: 0,
+      message: `Preparing ${actionVerb.toLowerCase()} job...`,
+      currentHost: isBatch ? `${targets.length} hosts selected` : installData.host,
+      hostIndex: 0,
+      totalHosts: targets.length
+    });
+
     if (!isBatch) {
       const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
       try {
-        await installRemoteAgent(installData);
+        const startResult = await installRemoteAgent(installData);
+        updateProgress({
+          requestId: startResult.requestId,
+          status: 'running',
+          phase: 'queued',
+          message: 'Install job accepted by backend',
+          currentHost: installData.hostname || installData.host,
+          hostIndex: 1,
+          totalHosts: 1
+        });
+        await waitForInstallJob(startResult.requestId, { hostname: installData.hostname || installData.host }, 0, 1);
         toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
         setTimeout(() => {
           loadData();
@@ -369,7 +432,17 @@ function App() {
       };
 
       try {
-        await installRemoteAgent(payload);
+        const startResult = await installRemoteAgent(payload);
+        updateProgress({
+          requestId: startResult.requestId,
+          status: 'running',
+          phase: 'queued',
+          message: `Install job accepted for ${target.hostname}`,
+          currentHost: target.hostname,
+          hostIndex: i + 1,
+          totalHosts: targets.length
+        });
+        await waitForInstallJob(startResult.requestId, target, i, targets.length);
         successCount += 1;
       } catch (error) {
         failures.push({ hostname: target.hostname, message: error.message });

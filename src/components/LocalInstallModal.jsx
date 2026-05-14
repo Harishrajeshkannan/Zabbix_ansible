@@ -30,6 +30,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     pskIdentity: ''
   });
   const [installing, setInstalling] = useState(false);
+  const [installStatus, setInstallStatus] = useState(null);
   const lastInitKeyRef = useRef('');
 
   useEffect(() => {
@@ -55,6 +56,8 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   useEffect(() => {
     if (!isOpen) {
       lastInitKeyRef.current = '';
+      setInstalling(false);
+      setInstallStatus(null);
     }
   }, [isOpen]);
 
@@ -66,14 +69,62 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     }));
   };
 
+  const updateInstallStatus = (patchOrUpdater) => {
+    setInstallStatus((prev) => {
+      const patch = typeof patchOrUpdater === 'function' ? patchOrUpdater(prev || {}) : patchOrUpdater;
+      const nextSteps = Array.isArray(patch?.steps) && patch.steps.length > 0
+        ? patch.steps
+        : (prev?.steps || []);
+
+      return {
+        ...(prev || {}),
+        ...patch,
+        steps: nextSteps
+      };
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInstalling(true);
+    updateInstallStatus({
+      status: 'starting',
+      phase: 'starting',
+      message: 'Submitting install request...',
+      percent: 0,
+      currentTask: 'Preparing installation',
+      steps: [
+        { key: 'gathering_facts', label: 'Gathering facts', status: 'pending', detail: '' },
+        { key: 'validate_inputs', label: 'Validate required inputs', status: 'pending', detail: '' },
+        { key: 'validate_version', label: 'Validate semantic version', status: 'pending', detail: '' },
+        { key: 'derive_values', label: 'Derive repo and channel values', status: 'pending', detail: '' },
+        { key: 'query_repo', label: 'Query Zabbix repository', status: 'pending', detail: '' },
+        { key: 'validate_repo_rpm', label: 'Validate RPM discovery', status: 'pending', detail: '' },
+        { key: 'set_repo_url', label: 'Set RPM URL', status: 'pending', detail: '' },
+        { key: 'install_agent', label: 'Install Zabbix Agent 2', status: 'pending', detail: '' },
+        { key: 'deploy_config', label: 'Deploy configuration', status: 'pending', detail: '' },
+        { key: 'enable_service', label: 'Enable and start service', status: 'pending', detail: '' }
+      ]
+    });
 
     try {
-      await onInstall(formData);
-      onClose();
+      await onInstall(formData, { update: updateInstallStatus });
+      updateInstallStatus((prev) => ({
+        ...prev,
+        status: 'completed',
+        phase: 'completed',
+        message: 'Installation completed successfully',
+        percent: 100,
+        currentTask: 'Completed'
+      }));
     } catch (error) {
+      updateInstallStatus((prev) => ({
+        ...prev,
+        status: 'failed',
+        phase: 'failed',
+        message: error.message,
+        currentTask: 'Failed'
+      }));
       console.error('Installation failed:', error);
     } finally {
       setInstalling(false);
@@ -91,6 +142,48 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
         </div>
 
         <form onSubmit={handleSubmit} className="install-form">
+          {installStatus && (
+            <div className={`install-progress-card ${installStatus.status || 'running'}`}>
+              <div className="install-progress-header">
+                <div>
+                  <div className="install-progress-kicker">
+                    {installStatus.status === 'completed'
+                      ? 'Completed'
+                      : installStatus.status === 'failed'
+                        ? 'Failed'
+                        : 'Installing'}
+                  </div>
+                  <div className="install-progress-title">
+                    {installStatus.currentHost || formData.hostname || formData.host || 'Target host'}
+                  </div>
+                </div>
+                <div className="install-progress-percent">{Math.max(0, Math.min(100, installStatus.percent || 0))}%</div>
+              </div>
+
+              <div className="install-progress-message">{installStatus.message || 'Waiting for updates...'}</div>
+
+              <div className="install-progress-bar">
+                <div
+                  className="install-progress-bar-fill"
+                  style={{ width: `${Math.max(0, Math.min(100, installStatus.percent || 0))}%` }}
+                />
+              </div>
+
+              {installStatus.steps?.length > 0 && (
+                <ul className="install-progress-steps">
+                  {installStatus.steps.map((step) => (
+                    <li key={step.key} className={`install-progress-step ${step.status}`}>
+                      <span className="step-status-dot" />
+                      <div className="step-body">
+                        <div className="step-label">{step.label}</div>
+                        {step.detail && <div className="step-detail">{step.detail}</div>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="form-section">
             <h3>Target Host</h3>
             {isBatchMode && (
@@ -238,15 +331,21 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
 
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose} disabled={installing}>
-              Cancel
+              {installStatus?.status === 'completed' || installStatus?.status === 'failed' ? 'Close' : 'Cancel'}
             </button>
-            <button type="submit" className="btn-install" disabled={installing}>
-              {installing
-                ? (isInstallUpdateAction ? 'Processing...' : (isUpdateAction ? 'Updating...' : 'Installing...'))
-                : (isBatchMode
-                  ? `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Selected Hosts (${selectedHosts.length})`
-                  : `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Agent`)}
-            </button>
+            {!(installStatus?.status === 'completed' || installStatus?.status === 'failed') ? (
+              <button type="submit" className="btn-install" disabled={installing}>
+                {installing
+                  ? (isInstallUpdateAction ? 'Processing...' : (isUpdateAction ? 'Updating...' : 'Installing...'))
+                  : (isBatchMode
+                    ? `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Selected Hosts (${selectedHosts.length})`
+                    : `${isInstallUpdateAction ? 'Install/Update' : (isUpdateAction ? 'Update' : 'Install')} Agent`)}
+              </button>
+            ) : (
+              <button type="button" className="btn-install" onClick={onClose}>
+                Done
+              </button>
+            )}
           </div>
         </form>
       </div>
