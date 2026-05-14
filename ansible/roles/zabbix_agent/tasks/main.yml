@@ -19,7 +19,7 @@
 - name: Derive version/channel values
   ansible.builtin.set_fact:
     zabbix_major_minor: "{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
-    zabbix_repo_rpm: "https://repo.zabbix.com/zabbix/{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}/rhel/{{ ansible_distribution_major_version }}/x86_64/zabbix-release-latest-{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}.el{{ ansible_distribution_major_version }}.noarch.rpm"
+    zabbix_repo_rpm: "https://repo.zabbix.com/zabbix/{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}/stable/rhel/{{ ansible_distribution_major_version }}/x86_64/zabbix-release-latest-{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}.el{{ ansible_distribution_major_version }}.noarch.rpm"
 
 - name: Install or update Zabbix repository package
   ansible.builtin.dnf:
