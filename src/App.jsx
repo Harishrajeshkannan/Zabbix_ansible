@@ -9,10 +9,12 @@ import Loading from './components/Loading';
 import ErrorMessage from './components/ErrorMessage';
 import VersionSelector from './components/VersionSelector';
 import LocalInstallModal from './components/LocalInstallModal';
+import InstallProgressModal from './components/InstallProgressModal';
 import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
-import { logAgentAction, downloadAgentPackage, installRemoteAgent, getInstallRemoteStatus, restartRemoteAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
+import { resolveBackendApiUrl } from './services/apiBase';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -48,6 +50,12 @@ function App() {
   const [selectedHost, setSelectedHost] = useState(null);
   const [actionType, setActionType] = useState('');
   const [selectedHostIds, setSelectedHostIds] = useState([]);
+  
+  // Installation progress modal state
+  const [progressModalOpen, setProgressModalOpen] = useState(false);
+  const [progressRequestId, setProgressRequestId] = useState(null);
+  const [progressHost, setProgressHost] = useState(null);
+  const [progressVersion, setProgressVersion] = useState(null);
   const [batchHosts, setBatchHosts] = useState([]);
   const [preferredFileHost, setPreferredFileHost] = useState(null);
   const [restartInProgress, setRestartInProgress] = useState(false);
@@ -314,7 +322,7 @@ function App() {
     setLocalInstallModalOpen(true);
   };
 
-  const handleLocalInstall = async (installData, progressApi = {}) => {
+  const handleLocalInstall = async (installData) => {
     const action = actionType || 'install';
     const isMixedAction = action === 'install-update';
     const actionVerb = isMixedAction
@@ -332,79 +340,33 @@ function App() {
       throw new Error('No host selected');
     }
 
-    const updateProgress = (patch) => {
-      if (typeof progressApi.update === 'function') {
-        progressApi.update(patch);
-      }
-    };
-
-    const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-    const waitForInstallJob = async (requestId, host, index, total) => {
-      updateProgress({
-        phase: 'running',
-        status: 'running',
-        percent: 5,
-        message: `Waiting for job status for ${host.hostname}`,
-        currentHost: host.hostname,
-        hostIndex: index + 1,
-        totalHosts: total
-      });
-
-      while (true) {
-        const statusResponse = await getInstallRemoteStatus(requestId);
-        const job = statusResponse.job || {};
-
-        updateProgress({
-          ...job,
-          currentHost: host.hostname,
-          hostIndex: index + 1,
-          totalHosts: total,
-          message: job.message || `Installing on ${host.hostname}`
-        });
-
-        if (job.status === 'completed') {
-          return job;
-        }
-
-        if (job.status === 'failed') {
-          throw new Error(job.error || job.message || `Installation failed on ${host.hostname}`);
-        }
-
-        await delay(1500);
-      }
-    };
-
-    updateProgress({
-      status: 'starting',
-      phase: 'starting',
-      percent: 0,
-      message: `Preparing ${actionVerb.toLowerCase()} job...`,
-      currentHost: isBatch ? `${targets.length} hosts selected` : installData.host,
-      hostIndex: 0,
-      totalHosts: targets.length
-    });
-
     if (!isBatch) {
-      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
       try {
-        const startResult = await installRemoteAgent(installData);
-        updateProgress({
-          requestId: startResult.requestId,
-          status: 'running',
-          phase: 'queued',
-          message: 'Install job accepted by backend',
-          currentHost: installData.hostname || installData.host,
-          hostIndex: 1,
-          totalHosts: 1
-        });
-        await waitForInstallJob(startResult.requestId, { hostname: installData.hostname || installData.host }, 0, 1);
-        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
+        // Close the install modal
+        setLocalInstallModalOpen(false);
+        
+        // Show progress modal
+        setProgressHost(installData.host);
+        setProgressVersion(installData.version);
+        
+        // Trigger the install and capture the request ID
+        const response = await installRemoteAgent(installData);
+        
+        if (response?.requestId) {
+          setProgressRequestId(response.requestId);
+          setProgressModalOpen(true);
+        } else {
+          // Fallback if requestId is not returned
+          toast.error('Could not track installation progress');
+          throw new Error('No request ID returned');
+        }
+        
+        // After progress modal closes, reload data
         setTimeout(() => {
           loadData();
         }, 2000);
       } catch (error) {
-        toast.error(`${action === 'install' ? 'Installation' : 'Update'} failed: ${error.message}`, { id: toastId });
+        toast.error(`Installation failed: ${error.message}`);
         throw error;
       }
       return;
@@ -432,17 +394,7 @@ function App() {
       };
 
       try {
-        const startResult = await installRemoteAgent(payload);
-        updateProgress({
-          requestId: startResult.requestId,
-          status: 'running',
-          phase: 'queued',
-          message: `Install job accepted for ${target.hostname}`,
-          currentHost: target.hostname,
-          hostIndex: i + 1,
-          totalHosts: targets.length
-        });
-        await waitForInstallJob(startResult.requestId, target, i, targets.length);
+        await installRemoteAgent(payload);
         successCount += 1;
       } catch (error) {
         failures.push({ hostname: target.hostname, message: error.message });
@@ -682,6 +634,21 @@ function App() {
         selectedHost={selectedHost}
         selectedHosts={batchHosts}
         action={actionType}
+      />
+
+      {/* Installation Progress Modal */}
+      <InstallProgressModal
+        isOpen={progressModalOpen}
+        requestId={progressRequestId}
+        host={progressHost}
+        version={progressVersion}
+        onClose={() => {
+          setProgressModalOpen(false);
+          setProgressRequestId(null);
+          setProgressHost(null);
+          setProgressVersion(null);
+        }}
+        backendApiUrl={resolveBackendApiUrl()}
       />
     </div>
   );

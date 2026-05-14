@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import path from 'path';
@@ -29,8 +29,6 @@ const upload = multer({
 // ============= SIMPLE FILE + CONSOLE LOGGER =============
 const LOG_DIR = path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'server.log');
-const INSTALL_PROGRESS_RETENTION_MS = 60 * 60 * 1000;
-const installProgressStore = new Map();
 
 async function ensureLogDir() {
   try {
@@ -161,95 +159,6 @@ async function executeShellCommand(command, options = {}) {
   }
 }
 
-async function executeStreamingShellCommand(command, options = {}) {
-  const { cwd, env, label = 'shell', requestId = '', onStdoutLine, onStderrLine } = options;
-  const redactedCommand = redactSensitiveText(command);
-  const startedAt = Date.now();
-  const reqPrefix = buildRequestPrefix(requestId);
-
-  logInfo(`${reqPrefix}[executeShellCommand] [${label}] Received command: "${redactedCommand}"`);
-  logInfo(`${reqPrefix}[executeShellCommand] [${label}] Command length: ${command.length}`);
-
-  return new Promise((resolve) => {
-    const child = spawn('/bin/bash', ['-lc', command], {
-      cwd,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let stdoutBuffer = '';
-    let stderrBuffer = '';
-
-    const drainLines = (buffer, chunk, appendText, handler) => {
-      const text = chunk.toString();
-      appendText(text);
-      buffer += text;
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.trim()) {
-          handler?.(line);
-        }
-      }
-      return buffer;
-    };
-
-    child.stdout.on('data', (chunk) => {
-      stdoutBuffer = drainLines(stdoutBuffer, chunk, (text) => { stdout += text; }, onStdoutLine);
-    });
-
-    child.stderr.on('data', (chunk) => {
-      stderrBuffer = drainLines(stderrBuffer, chunk, (text) => { stderr += text; }, onStderrLine);
-    });
-
-    child.on('error', (error) => {
-      const durationMs = Date.now() - startedAt;
-      logError(`${reqPrefix}[executeShellCommand] [${label}] Execution failed to start (durationMs=${durationMs}): ${error.message}`, error);
-      resolve({ stdout, stderr, success: false, error: error.message, exitCode: null, signal: '', durationMs });
-    });
-
-    child.on('close', (exitCode, signal) => {
-      if (stdoutBuffer.trim()) {
-        stdout += `${stdoutBuffer}\n`;
-        stdoutBuffer.split(/\r?\n/).forEach((line) => {
-          if (line.trim()) {
-            onStdoutLine?.(line);
-          }
-        });
-      }
-
-      if (stderrBuffer.trim()) {
-        stderr += `${stderrBuffer}\n`;
-        stderrBuffer.split(/\r?\n/).forEach((line) => {
-          if (line.trim()) {
-            onStderrLine?.(line);
-          }
-        });
-      }
-
-      const durationMs = Date.now() - startedAt;
-      const success = exitCode === 0;
-
-      if (success) {
-        logInfo(`${reqPrefix}[executeShellCommand] [${label}] Execution successful (exitCode=0 durationMs=${durationMs})`);
-      } else {
-        logError(`${reqPrefix}[executeShellCommand] [${label}] Execution failed (exitCode=${exitCode ?? 'unknown'} signal=${signal || 'none'} durationMs=${durationMs})`);
-      }
-
-      if (stdout && stdout.trim()) {
-        logInfo(`${reqPrefix}[executeShellCommand] [${label}] stdout: ${truncateText(redactSensitiveText(stdout))}`);
-      }
-      if (stderr && stderr.trim()) {
-        logInfo(`${reqPrefix}[executeShellCommand] [${label}] stderr: ${truncateText(redactSensitiveText(stderr))}`);
-      }
-
-      resolve({ stdout, stderr, success, exitCode, signal, durationMs });
-    });
-  });
-}
-
 
 /**
  * Run an Ansible playbook against a single target host.
@@ -319,58 +228,20 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}, context = 
     ANSIBLE_ROLES_PATH: path.join(ansibleRoot, 'roles')
   };
   
-  updateInstallJob(requestId, {
-    status: 'running',
-    phase: 'starting',
-    message: 'Launching Ansible playbook',
-    percent: 5
-  });
-
-  const result = await executeStreamingShellCommand(cmd, {
+  const result = await executeShellCommand(cmd, {
     timeout: 10 * 60 * 1000,
     maxBuffer: 10 * 1024 * 1024,
     label: 'ansible-playbook',
     requestId,
     cwd: ansibleRoot,
-    env: envVars,
-    onStdoutLine: (line) => applyAnsibleProgressLine(requestId, line),
-    onStderrLine: (line) => {
-      if (line && line.trim()) {
-        logInfo(`${reqPrefix}[ANSIBLE][stderr] ${truncateText(redactSensitiveText(line))}`);
-      }
-    }
+    env: envVars
   });
 
-  const currentJob = getInstallProgress(requestId);
   if (!result.success) {
     const failureText = `${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`;
     const reason = detectAnsibleFailureReason(failureText);
-    const failedSteps = currentJob?.steps?.map((step) => (
-      step.status === 'running' ? { ...step, status: 'failed' } : step
-    ));
-    updateInstallJob(requestId, {
-      status: 'failed',
-      phase: 'failed',
-      message: failureText || `Playbook failed (${reason})`,
-      error: failureText || `Playbook failed (${reason})`,
-      currentTask: 'Failed',
-      finishedAt: new Date().toISOString(),
-      steps: failedSteps || currentJob?.steps
-    });
     logError(`${reqPrefix}[ANSIBLE] Playbook failed reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
   } else {
-    const completedSteps = currentJob?.steps?.map((step) => (
-      step.status === 'running' ? { ...step, status: 'done' } : step
-    ));
-    updateInstallJob(requestId, {
-      status: 'completed',
-      phase: 'completed',
-      message: 'Installation completed successfully',
-      currentTask: 'Completed',
-      percent: 100,
-      finishedAt: new Date().toISOString(),
-      steps: completedSteps || currentJob?.steps
-    });
     logInfo(`${reqPrefix}[ANSIBLE] Playbook succeeded durationMs=${result.durationMs ?? 'unknown'}`);
   }
 
@@ -439,243 +310,6 @@ function detectAnsibleFailureReason(text = '') {
   if (msg.includes('failed to validate gpg signature') || msg.includes('public key for')) return 'repo_gpg_validation_failed';
   if (msg.includes('failed!') || msg.includes('fatal:')) return 'ansible_task_failed';
   return 'unknown';
-}
-
-const installJobs = new Map();
-
-function calculateInstallProgress(steps = []) {
-  if (!steps.length) {
-    return 0;
-  }
-
-  const doneCount = steps.filter((step) => step.status === 'done').length;
-  const runningCount = steps.some((step) => step.status === 'running') ? 1 : 0;
-  return Math.min(100, Math.round(((doneCount + (runningCount * 0.5)) / steps.length) * 100));
-}
-
-function mapTaskNameToStepKey(taskName = '') {
-  const normalized = String(taskName || '').replace(/^zabbix_agent\s*:\s*/i, '').trim();
-  const mapping = {
-    'Gathering Facts': 'gathering_facts',
-    'Validate required install inputs': 'validate_inputs',
-    'Validate semantic version format': 'validate_version',
-    'Derive version/channel values': 'derive_values',
-    'Query repository to find exact zabbix-agent2 RPM filename': 'query_repo',
-    'Validate zabbix-agent2 RPM was found': 'validate_repo_rpm',
-    'Set zabbix_agent2_rpm URL': 'set_repo_url',
-    'Install Zabbix Agent 2 package': 'install_agent',
-    'Deploy zabbix_agent2 configuration': 'deploy_config',
-    'Ensure Zabbix Agent service is enabled and started': 'enable_service'
-  };
-
-  return mapping[normalized] || '';
-}
-
-function createInstallProgressEntry(requestId, details = {}) {
-  return {
-    requestId,
-    status: 'running',
-    phase: 'queued',
-    message: 'Queued install request',
-    percent: 0,
-    currentTask: 'Waiting to start',
-    currentHost: details.currentHost || '',
-    hostname: details.hostname || '',
-    version: details.version || '',
-    serverIP: details.serverIP || '',
-    serverPort: details.serverPort || '',
-    listenerPort: details.listenerPort || '',
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    history: []
-  };
-}
-
-function setInstallProgress(requestId, patch = {}) {
-  if (!requestId) {
-    return null;
-  }
-
-  const previous = installProgressStore.get(requestId) || createInstallProgressEntry(requestId);
-  const nextHistory = Array.isArray(patch.history)
-    ? patch.history.slice(-20)
-    : previous.history.slice(-20);
-
-  if (patch.historyEntry) {
-    nextHistory.push({
-      timestamp: new Date().toISOString(),
-      ...patch.historyEntry
-    });
-  }
-
-  const next = {
-    ...previous,
-    ...patch,
-    history: nextHistory.slice(-20),
-    updatedAt: new Date().toISOString()
-  };
-
-  delete next.historyEntry;
-  installProgressStore.set(requestId, next);
-  return next;
-}
-
-function getInstallProgress(requestId) {
-  return installProgressStore.get(requestId) || null;
-}
-
-function cloneJob(job) {
-  return job ? JSON.parse(JSON.stringify(job)) : null;
-}
-
-function startInstallJob(requestId, details = {}) {
-  const job = createInstallProgressEntry(requestId, details);
-  installProgressStore.set(requestId, job);
-  return job;
-}
-
-function updateInstallJob(requestId, patch = {}) {
-  const existing = installProgressStore.get(requestId) || createInstallProgressEntry(requestId);
-  const next = {
-    ...existing,
-    ...patch,
-    updatedAt: new Date().toISOString()
-  };
-
-  if (patch.steps) {
-    next.steps = patch.steps;
-  }
-
-  if (typeof patch.percent !== 'number') {
-    next.percent = calculateInstallProgress(next.steps || []);
-  }
-
-  installProgressStore.set(requestId, next);
-  return next;
-}
-
-function clearStaleInstallProgress() {
-  const now = Date.now();
-  for (const [requestId, entry] of installProgressStore.entries()) {
-    const age = now - new Date(entry.updatedAt || entry.startedAt || now).getTime();
-    if (age > INSTALL_PROGRESS_RETENTION_MS) {
-      installProgressStore.delete(requestId);
-    }
-  }
-}
-
-function getTaskProgress(taskName = '') {
-  const taskOrder = [
-    'Gathering Facts',
-    'Validate required install inputs',
-    'Validate semantic version format',
-    'Derive version/channel values',
-    'Query repository to find exact zabbix-agent2 RPM filename',
-    'Validate zabbix-agent2 RPM was found',
-    'Set zabbix_agent2_rpm URL',
-    'Install Zabbix Agent 2 package',
-    'Deploy zabbix_agent2 configuration',
-    'Ensure Zabbix Agent service is enabled and started'
-  ];
-
-  const index = taskOrder.findIndex((task) => taskName.includes(task));
-  if (index < 0) {
-    return null;
-  }
-
-  const percent = Math.max(5, Math.min(95, Math.round(((index + 1) / taskOrder.length) * 100)));
-  return { percent, phase: taskOrder[index] };
-}
-
-function applyAnsibleProgressLine(requestId, rawLine) {
-  const line = String(rawLine || '').trim();
-  if (!line) {
-    return;
-  }
-
-  if (line.startsWith('TASK [')) {
-    const taskMatch = line.match(/^TASK \[(.*)\]/);
-    const taskName = taskMatch ? taskMatch[1] : line;
-    const progress = getTaskProgress(taskName) || { percent: 10, phase: taskName };
-    const existing = getInstallProgress(requestId);
-    if (existing?.currentTask) {
-      const previousStepKey = mapTaskNameToStepKey(existing.currentTask);
-      if (previousStepKey) {
-        const previousSteps = existing.steps.map((step) => (
-          step.key === previousStepKey && step.status === 'running'
-            ? { ...step, status: 'done' }
-            : step
-        ));
-        installProgressStore.set(requestId, {
-          ...existing,
-          steps: previousSteps,
-          percent: calculateInstallProgress(previousSteps),
-          updatedAt: new Date().toISOString()
-        });
-      }
-    }
-
-    setInstallProgress(requestId, {
-      phase: progress.phase,
-      message: `Running ${progress.phase}`,
-      currentTask: progress.phase,
-      percent: progress.percent,
-      historyEntry: {
-        type: 'task',
-        message: progress.phase
-      }
-    });
-    return;
-  }
-
-  if (line.startsWith('fatal:') || line.includes('FAILED!')) {
-    setInstallProgress(requestId, {
-      status: 'failed',
-      phase: 'failed',
-      message: line,
-      currentTask: 'Failed',
-      historyEntry: {
-        type: 'error',
-        message: line
-      }
-    });
-    return;
-  }
-
-  if (line.includes('PLAY RECAP')) {
-    setInstallProgress(requestId, {
-      phase: 'finalizing',
-      message: 'Finalizing install results',
-      percent: 98,
-      historyEntry: {
-        type: 'info',
-        message: 'PLAY RECAP received'
-      }
-    });
-    return;
-  }
-
-  if (line.startsWith('ok:') || line.startsWith('changed:')) {
-    setInstallProgress(requestId, {
-      historyEntry: {
-        type: 'info',
-        message: line
-      }
-    });
-    return;
-  }
-
-  if (line.startsWith('PLAY [')) {
-    setInstallProgress(requestId, {
-      phase: 'starting',
-      message: line,
-      percent: 5,
-      historyEntry: {
-        type: 'info',
-        message: line
-      }
-    });
-  }
 }
 
 // ============= END HELPER FUNCTIONS =============
@@ -1078,79 +712,25 @@ app.post('/api/install-remote', async (req, res) => {
       return res.status(400).json({ error: 'Invalid version format', details: 'Version must be in format X.Y.Z (e.g., 7.4.6)' });
     }
 
-    startInstallJob(requestId, { host, hostname, version, serverIP, serverPort, listenerPort, action: 'install' });
-
     // Invoke Ansible playbook
     const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
     const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
 
-    void (async () => {
-      const result = await runAnsiblePlaybook(playbookPath, host, extraVars, { requestId });
-      const currentJob = getInstallProgress(requestId);
+    const result = await runAnsiblePlaybook(playbookPath, host, extraVars, { requestId });
 
-      if (result.success) {
-        updateInstallJob(requestId, {
-          status: 'completed',
-          phase: 'completed',
-          message: `Ansible playbook completed for ${host}`,
-          percent: 100,
-          finishedAt: new Date().toISOString(),
-          error: null
-        });
-        logInfo(`${reqPrefix}[ANSIBLE-INSTALL] Completed successfully for host=${host} durationMs=${result.durationMs ?? 'unknown'}`);
-        return;
-      }
+    if (result.success) {
+      logInfo(`${reqPrefix}[ANSIBLE-INSTALL] Completed successfully for host=${host} durationMs=${result.durationMs ?? 'unknown'}`);
+      return res.json({ success: true, requestId, message: `Ansible playbook ran for ${host}`, output: result.stdout });
+    }
 
-      const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
-      const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
-      const failureMessage = result.stderr || result.error || 'Playbook failed';
-      installJobs.set(requestId, {
-        ...(currentJob || startInstallJob(requestId, { host, hostname, version, serverIP, serverPort, listenerPort, action: 'install' })),
-        status: 'failed',
-        phase: 'failed',
-        message: failureMessage,
-        error: failureMessage,
-        percent: currentJob?.percent || 0,
-        finishedAt: new Date().toISOString()
-      });
-      logError(`${reqPrefix}[ANSIBLE-INSTALL] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
-    })().catch((error) => {
-      const failureJob = getInstallProgress(requestId);
-      if (failureJob) {
-        installJobs.set(requestId, {
-          ...failureJob,
-          status: 'failed',
-          phase: 'failed',
-          message: error.message,
-          error: error.message,
-          finishedAt: new Date().toISOString()
-        });
-      }
-      logError(`${reqPrefix}[ANSIBLE-INSTALL] Background execution error:`, error);
-    });
-
-    return res.status(202).json({
-      success: true,
-      accepted: true,
-      requestId,
-      statusUrl: `/api/install-remote/status/${requestId}`,
-      message: `Ansible install started for ${host}`
-    });
+    const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+    const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
+    logError(`${reqPrefix}[ANSIBLE-INSTALL] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
+    return res.status(status).json({ success: false, requestId, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
     logError(`${reqPrefix}[ANSIBLE-INSTALL] Failed with exception:`, error);
-    return res.status(500).json({ success: false, error: 'Installation failed', details: error.message });
+    return res.status(500).json({ success: false, requestId: req.requestId, error: 'Installation failed', details: error.message });
   }
-});
-
-app.get('/api/install-remote/status/:requestId', async (req, res) => {
-  const { requestId } = req.params;
-  const job = getInstallProgress(requestId);
-
-  if (!job) {
-    return res.status(404).json({ success: false, error: 'Install job not found' });
-  }
-
-  return res.json({ success: true, job: cloneJob(job) });
 });
 
 /**
@@ -1311,6 +891,100 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
   return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Bulk upload is being migrated to Ansible.' });
 });
 
+/**
+ * Stream installation progress logs via SSE (Server-Sent Events)
+ * Frontend polls this endpoint to get real-time installation progress
+ */
+app.get('/api/install-progress/:requestId', async (req, res) => {
+  const { requestId } = req.params;
+  const { since = '0' } = req.query; // line number to start from
+  
+  try {
+    const sinceLineNum = parseInt(since, 10) || 0;
+    
+    // Read the server log file
+    const logContent = await fs.readFile(LOG_FILE, 'utf-8').catch(() => '');
+    const lines = logContent.split('\n');
+    
+    // Filter lines for this requestId and those after the 'since' line
+    const filteredLines = lines
+      .slice(sinceLineNum)
+      .filter(line => line.includes(`[req:${requestId}]`));
+    
+    // Extract progress information from log lines
+    const progressEntries = filteredLines.map(line => {
+      const match = line.match(/\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\]\s+\[([A-Z]+)\]\s+(.+)/);
+      if (!match) return null;
+      
+      const [, timestamp, level, message] = match;
+      
+      // Parse step from message
+      let step = null;
+      let status = null;
+      
+      if (message.includes('Gathering Facts')) {
+        step = 'Gathering Facts';
+        status = message.includes('ok:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Validate required')) {
+        step = 'Validating Inputs';
+        status = message.includes('ok:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Validate semantic')) {
+        step = 'Validating Version';
+        status = message.includes('ok:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Derive version')) {
+        step = 'Deriving Configuration';
+        status = message.includes('ok:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Query repository')) {
+        step = 'Querying Repository';
+        status = message.includes('ok:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Validate zabbix-agent2')) {
+        step = 'Validating Agent Package';
+        status = message.includes('ok:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Install Zabbix Agent 2')) {
+        step = 'Installing Agent Package';
+        status = message.includes('ok:') || message.includes('changed:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Deploy zabbix_agent2')) {
+        step = 'Configuring Agent';
+        status = message.includes('ok:') || message.includes('changed:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Ensure Zabbix Agent')) {
+        step = 'Starting Service';
+        status = message.includes('ok:') || message.includes('changed:') ? 'completed' : 'in-progress';
+      } else if (message.includes('Playbook succeeded')) {
+        step = 'Installation Complete';
+        status = 'completed';
+      } else if (message.includes('Playbook failed')) {
+        step = 'Installation Failed';
+        status = 'failed';
+      }
+      
+      return step ? { timestamp, level, step, status, message } : null;
+    }).filter(Boolean);
+    
+    // Determine overall status
+    let overallStatus = 'in-progress';
+    if (filteredLines.some(l => l.includes('Playbook succeeded'))) {
+      overallStatus = 'completed';
+    } else if (filteredLines.some(l => l.includes('Playbook failed'))) {
+      overallStatus = 'failed';
+    }
+    
+    res.json({
+      success: true,
+      requestId,
+      status: overallStatus,
+      progress: progressEntries,
+      nextSince: lines.length
+    });
+  } catch (error) {
+    logError(`Error reading progress for ${requestId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to read progress',
+      details: error.message
+    });
+  }
+});
+
 app.listen(PORT, async () => {
   const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
   
@@ -1333,9 +1007,5 @@ app.listen(PORT, async () => {
     logError(`❌ ERROR: Cannot write to /tmp/ directory: ${err.message}`, err);
   }
   
-  setInterval(() => {
-    clearStaleInstallProgress();
-  }, 15 * 60 * 1000).unref?.();
-
   logInfo('✨ Backend ready to accept Ansible remote installation requests\n');
 });
