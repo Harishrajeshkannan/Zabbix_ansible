@@ -340,27 +340,29 @@ function App() {
       throw new Error('No host selected');
     }
 
-    if (!isBatch) {
+      if (!isBatch) {
       try {
         // Close the install modal
         setLocalInstallModalOpen(false);
-        
-        // Show progress modal
+
+        // Prepare progress modal immediately so it appears as soon as install starts
         setProgressHost(installData.host);
         setProgressVersion(installData.version);
-        
+        setProgressRequestId(null);
+        setProgressModalOpen(true);
+
         // Trigger the install and capture the request ID
         const response = await installRemoteAgent(installData);
-        
+
         if (response?.requestId) {
+          // Update modal to poll using returned requestId
           setProgressRequestId(response.requestId);
-          setProgressModalOpen(true);
         } else {
           // Fallback if requestId is not returned
           toast.error('Could not track installation progress');
           throw new Error('No request ID returned');
         }
-        
+
         // After progress modal closes, reload data
         setTimeout(() => {
           loadData();

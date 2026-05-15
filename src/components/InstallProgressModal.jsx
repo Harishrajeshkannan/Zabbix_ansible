@@ -58,7 +58,15 @@ const InstallProgressModal = ({ isOpen, requestId, onClose, backendApiUrl }) => 
     };
   }, [isOpen, requestId, backendApiUrl, onClose]);
 
-  if (!isOpen || !requestId) return null;
+  if (!isOpen) return null;
+
+  // When modal opens but requestId is not yet available, show first step as in-progress
+  useEffect(() => {
+    if (isOpen && !requestId) {
+      setProgress({ [INSTALLATION_STEPS[0].id]: 'in-progress' });
+      setStatus('in-progress');
+    }
+  }, [isOpen, requestId]);
 
   return (
     <div className="install-toast" role="status" aria-live="polite">
