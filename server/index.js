@@ -304,7 +304,6 @@ function detectAnsibleFailureReason(text = '') {
   if (msg.includes('no route to host')) return 'network_no_route';
   if (msg.includes('connection refused')) return 'ssh_connection_refused';
   if (msg.includes('could not resolve hostname')) return 'dns_resolution_failed';
-  if (msg.includes('failure downloading') && msg.includes('http error 404')) return 'repo_package_not_found';
   if (msg.includes('sudo') && msg.includes('password')) return 'sudo_become_failed';
   if (msg.includes('space separated string of packages')) return 'invalid_package_argument';
   if (msg.includes('failed to validate gpg signature') || msg.includes('public key for')) return 'repo_gpg_validation_failed';
