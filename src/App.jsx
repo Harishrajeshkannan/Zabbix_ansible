@@ -14,7 +14,7 @@ import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
 import { resolveBackendApiUrl } from './services/apiBase';
-import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent, installRemoteAgents, restartRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -378,38 +378,32 @@ function App() {
       return;
     }
 
-    // Run installs in parallel and collect results
-    const installPromises = finalTargets.map((target) => {
-      const t = typeof target === 'object' ? target : { hostname: String(target), ip: String(target) };
-      const payload = {
-        host: resolvePreferredHost(t),
-        version: installPayload.version,
-        serverIP: installPayload.serverIP,
-        serverPort: installPayload.serverPort,
-        listenerPort: installPayload.listenerPort,
-        hostname: t.hostname || resolvePreferredHost(t)
-      };
+    const batchPayload = {
+      hosts: finalTargets.map((target) => ({
+        host: resolvePreferredHost(target),
+        hostname: target.hostname,
+        ip: target.ip,
+      })),
+      version: installPayload.version,
+      serverIP: installPayload.serverIP,
+      serverPort: installPayload.serverPort,
+      listenerPort: installPayload.listenerPort,
+    };
 
-      return installRemoteAgent(payload)
-        .then(() => ({ hostname: payload.hostname, success: true }))
-        .catch((err) => ({ hostname: payload.hostname, success: false, error: err?.message || String(err) }));
-    });
+    const batchResult = await installRemoteAgents(batchPayload);
 
-    const settled = await Promise.allSettled(installPromises);
+    const successCount = batchResult?.summary?.successCount ?? 0;
+    const failureCount = batchResult?.summary?.failureCount ?? 0;
 
-    const successes = settled.filter(r => r.status === 'fulfilled' && r.value && r.value.success).map(r => r.value.hostname);
-    const failures = settled
-      .filter(r => (r.status === 'fulfilled' && r.value && !r.value.success) || r.status === 'rejected')
-      .map(r => {
-        if (r.status === 'fulfilled') return { hostname: r.value.hostname, message: r.value.error };
-        return { hostname: 'unknown', message: r.reason?.message || String(r.reason) };
-      });
-
-    if (failures.length === 0) {
-      toast.success(`Batch ${actionPastTense} completed on ${successes.length}/${finalTargets.length} hosts`);
+    if (failureCount === 0) {
+      toast.success(`Batch ${actionPastTense} completed on ${successCount}/${finalTargets.length} hosts`);
     } else {
-      const failureSummary = failures.slice(0, 3).map(f => `${f.hostname}: ${f.message}`).join(' | ');
-      toast.error(`Batch finished with failures (${successes.length}/${finalTargets.length} successful)`, { description: failureSummary });
+      const failureSummary = (batchResult?.results || [])
+        .filter((item) => !item.success)
+        .slice(0, 3)
+        .map((item) => `${item.hostname || item.host}: ${item.error || item.reason || 'Unknown error'}`)
+        .join(' | ');
+      toast.error(`Batch finished with failures (${successCount}/${finalTargets.length} successful)`, { description: failureSummary });
     }
 
     setSelectedHostIds([]);

@@ -682,6 +682,73 @@ app.post('/api/install-remote', async (req, res) => {
 });
 
 /**
+ * Install Zabbix agent on multiple remote RHEL servers via Ansible.
+ */
+app.post('/api/install-remote-batch', async (req, res) => {
+  logInfo('\n[ANSIBLE-INSTALL-BATCH] /api/install-remote-batch endpoint HIT!');
+  try {
+    const { hosts, version, serverIP, serverPort = 10051, listenerPort = 10050 } = req.body || {};
+
+    if (!Array.isArray(hosts) || hosts.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields', details: 'hosts array is required' });
+    }
+
+    if (!version || !serverIP) {
+      return res.status(400).json({ error: 'Missing required fields', details: 'version and serverIP are required' });
+    }
+
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+      return res.status(400).json({ error: 'Invalid version format', details: 'Version must be in format X.Y.Z (e.g., 7.4.6)' });
+    }
+
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
+    const results = [];
+
+    for (const hostEntry of hosts) {
+      const host = String(hostEntry?.host || hostEntry?.hostname || hostEntry?.ip || '').trim();
+      const hostname = String(hostEntry?.hostname || hostEntry?.host || hostEntry?.ip || host).trim();
+
+      if (!host) {
+        results.push({ host: hostname || 'unknown', success: false, error: 'host is required' });
+        continue;
+      }
+
+      const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
+      const result = await runAnsiblePlaybook(playbookPath, host, extraVars);
+
+      if (result.success) {
+        results.push({ host, hostname, success: true, output: result.stdout });
+      } else {
+        const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+        const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
+        results.push({
+          host,
+          hostname,
+          success: false,
+          status,
+          reason,
+          error: result.stderr || result.error,
+          output: result.stdout
+        });
+      }
+    }
+
+    const successCount = results.filter((item) => item.success).length;
+    const failureCount = results.length - successCount;
+
+    return res.json({
+      success: failureCount === 0,
+      message: `Batch installation completed on ${successCount}/${results.length} hosts`,
+      summary: { total: results.length, successCount, failureCount },
+      results
+    });
+  } catch (error) {
+    logError('[ANSIBLE-INSTALL-BATCH] Failed:', error);
+    return res.status(500).json({ success: false, error: 'Batch installation failed', details: error.message });
+  }
+});
+
+/**
  * Restart Zabbix agent service on a remote host via Ansible
  */
 app.post('/api/restart-agent', async (req, res) => {
