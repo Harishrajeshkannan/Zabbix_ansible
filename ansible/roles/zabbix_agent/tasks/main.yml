@@ -19,8 +19,10 @@
 - name: Derive version/channel values
   ansible.builtin.set_fact:
     zabbix_major_minor: "{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
-    zabbix_major_num: "{{ (version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1')) | float }}"
-    zabbix_stable_path: "{{ '/stable' if (zabbix_major_num >= 7.2) else '' }}"
+
+- name: Compute repo path and RPM filename
+  ansible.builtin.set_fact:
+    zabbix_stable_path: "{{ '/stable' if (zabbix_major_minor | float) >= 7.2 else '' }}"
     zabbix_repo_rpm: "https://repo.zabbix.com/zabbix/{{ zabbix_major_minor }}{{ zabbix_stable_path }}/rhel/{{ ansible_distribution_major_version }}/x86_64/zabbix-release-latest-{{ zabbix_major_minor }}.el{{ ansible_distribution_major_version }}.noarch.rpm"
 
 - name: Install or update Zabbix repository package
