@@ -720,13 +720,13 @@ app.post('/api/install-remote', async (req, res) => {
 
     if (result.success) {
       logInfo(`${reqPrefix}[ANSIBLE-INSTALL] Completed successfully for host=${host} durationMs=${result.durationMs ?? 'unknown'}`);
-      return res.json({ success: true, requestId, message: `Ansible playbook ran for ${host}`, output: result.stdout });
+      return res.json({ success: true, message: `Ansible playbook ran for ${host}`, output: result.stdout });
     }
 
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
     const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
     logError(`${reqPrefix}[ANSIBLE-INSTALL] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
-    return res.status(status).json({ success: false, requestId, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
+    return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
     logError(`${reqPrefix}[ANSIBLE-INSTALL] Failed with exception:`, error);
     return res.status(500).json({ success: false, requestId: req.requestId, error: 'Installation failed', details: error.message });

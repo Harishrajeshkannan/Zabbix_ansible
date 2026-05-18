@@ -14,7 +14,6 @@ import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
 import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
-import { resolveBackendApiUrl } from './services/apiBase';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -340,30 +339,11 @@ function App() {
       throw new Error('No host selected');
     }
 
-      if (!isBatch) {
+    if (!isBatch) {
+      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
       try {
-        // Close the install modal
-        setLocalInstallModalOpen(false);
-
-        // Prepare progress modal immediately so it appears as soon as install starts
-        setProgressHost(installData.host);
-        setProgressVersion(installData.version);
-        setProgressRequestId(null);
-        setProgressModalOpen(true);
-
-        // Trigger the install and capture the request ID
-        const response = await installRemoteAgent(installData);
-
-        if (response?.requestId) {
-          // Update modal to poll using returned requestId
-          setProgressRequestId(response.requestId);
-        } else {
-          // Fallback if requestId is not returned
-          toast.error('Could not track installation progress');
-          throw new Error('No request ID returned');
-        }
-
-        // After progress modal closes, reload data
+        await installRemoteAgent(installData);
+        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
         setTimeout(() => {
           loadData();
         }, 2000);
