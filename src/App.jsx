@@ -369,40 +369,47 @@ function App() {
       return;
     }
 
-    // Use modal-based progress for installs; avoid creating the old simple "installing" toast
-    const failures = [];
-    let successCount = 0;
+    // Support explicit target list from modal (installData.selectedHosts) or use computed targets
+    const explicitTargets = installData.selectedHosts && installData.selectedHosts.length ? installData.selectedHosts : null;
+    const finalTargets = explicitTargets || targets;
 
-    for (let i = 0; i < targets.length; i++) {
-      const target = targets[i];
-      // progress shown per-host via modal / final summary toasts, skip per-host loading toast
+    if (finalTargets.length === 0) {
+      toast.error('No eligible hosts selected for batch install/update.');
+      return;
+    }
 
+    // Run installs in parallel and collect results
+    const installPromises = finalTargets.map((target) => {
+      const t = typeof target === 'object' ? target : { hostname: String(target), ip: String(target) };
       const payload = {
-        host: resolvePreferredHost(target),
+        host: resolvePreferredHost(t),
         version: installPayload.version,
         serverIP: installPayload.serverIP,
         serverPort: installPayload.serverPort,
         listenerPort: installPayload.listenerPort,
-        hostname: target.hostname
+        hostname: t.hostname || resolvePreferredHost(t)
       };
 
-      try {
-        await installRemoteAgent(payload);
-        successCount += 1;
-      } catch (error) {
-        failures.push({ hostname: target.hostname, message: error.message });
-      }
-    }
+      return installRemoteAgent(payload)
+        .then(() => ({ hostname: payload.hostname, success: true }))
+        .catch((err) => ({ hostname: payload.hostname, success: false, error: err?.message || String(err) }));
+    });
+
+    const settled = await Promise.allSettled(installPromises);
+
+    const successes = settled.filter(r => r.status === 'fulfilled' && r.value && r.value.success).map(r => r.value.hostname);
+    const failures = settled
+      .filter(r => (r.status === 'fulfilled' && r.value && !r.value.success) || r.status === 'rejected')
+      .map(r => {
+        if (r.status === 'fulfilled') return { hostname: r.value.hostname, message: r.value.error };
+        return { hostname: 'unknown', message: r.reason?.message || String(r.reason) };
+      });
 
     if (failures.length === 0) {
-      toast.success(`Batch ${actionPastTense} completed on ${successCount}/${targets.length} hosts`);
+      toast.success(`Batch ${actionPastTense} completed on ${successes.length}/${finalTargets.length} hosts`);
     } else {
-      const failureSummary = failures
-        .slice(0, 3)
-        .map((item) => `${item.hostname}: ${item.message}`)
-        .join(' | ');
-
-      toast.error(`Batch finished with failures (${successCount}/${targets.length} successful)`, { description: failureSummary });
+      const failureSummary = failures.slice(0, 3).map(f => `${f.hostname}: ${f.message}`).join(' | ');
+      toast.error(`Batch finished with failures (${successes.length}/${finalTargets.length} successful)`, { description: failureSummary });
     }
 
     setSelectedHostIds([]);

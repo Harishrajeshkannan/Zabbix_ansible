@@ -61,9 +61,9 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInstalling(true);
-
     try {
-      await onInstall(formData);
+      const payload = { ...formData, selectedHosts };
+      await onInstall(payload);
       onClose();
     } catch (error) {
       console.error('Installation failed:', error);
