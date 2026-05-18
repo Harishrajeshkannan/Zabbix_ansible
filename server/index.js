@@ -524,27 +524,23 @@ app.get('/api/download-agent/:version', async (req, res) => {
     await executeShellCommand(`mkdir -p "${downloadDir}"`);
     await executeShellCommand(`chmod 755 "${downloadDir}"`);
     
-    // Construct repository URL - versions 7.2+ use /stable/ path, older versions don't
+    // Construct repository URL - only use repo.zabbix.com (stable path for 7.2+)
     const stablePath = majorNum >= 7.2 ? '/stable' : '';
     const repoUrl = `https://repo.zabbix.com/zabbix/${majorVersion}${stablePath}/rhel/${rhelVersion}/x86_64/`;
-    
     console.log(`[DOWNLOAD] Checking repository: ${repoUrl}`);
-    
-    // Search for the package in the repository
-    // Package format: zabbix-agent2-{version}-release{N}.el{rhelVersion}.x86_64.rpm
-    // Get the latest release if multiple exist (e.g., release1, release2)
+
     const searchCmd = `curl -s "${repoUrl}" | grep -oP "zabbix-agent2-${version}-release[0-9]+\\.el${rhelVersion}\\.x86_64\\.rpm" | sort -V | tail -1`;
     const searchResult = await executeShellCommand(searchCmd);
-    
+
     if (!searchResult.success || !searchResult.stdout.trim()) {
-      console.log(`[DOWNLOAD] ✗ Package not found in repository`);
+      console.log(`[DOWNLOAD] ✗ Package not found in repository: ${repoUrl}`);
       return res.status(404).json({
         error: 'Package not found',
-        details: `Zabbix Agent ${version} not found in RHEL ${rhelVersion} repository. Verify the version exists.`,
+        details: `Zabbix Agent ${version} not found in repository ${repoUrl}. Verify the version exists.`,
         repoUrl: repoUrl
       });
     }
-    
+
     const packageName = searchResult.stdout.trim();
     const packageUrl = `${repoUrl}${packageName}`;
     const downloadPath = path.join(downloadDir, packageName);
