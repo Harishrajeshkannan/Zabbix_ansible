@@ -21,24 +21,64 @@
     zabbix_major_minor: "{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
     zabbix_stable_path: "{{ '/stable' if ((version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1')) | float) >= 7.2 else '' }}"
 
-- name: Set zabbix_repo_rpm URL
-  ansible.builtin.set_fact:
-    zabbix_repo_rpm: "https://repo.zabbix.com/zabbix/{{ zabbix_major_minor }}{{ zabbix_stable_path }}/rhel/{{ ansible_distribution_major_version }}/x86_64/zabbix-release-latest-{{ zabbix_major_minor }}.el{{ ansible_distribution_major_version }}.noarch.rpm"
+- name: Discover Zabbix agent2 package in repo
+  ansible.builtin.shell: |
+    set -e
+    REPO_URL="https://repo.zabbix.com/zabbix/{{ zabbix_major_minor }}{{ zabbix_stable_path }}/rhel/{{ ansible_distribution_major_version }}/x86_64/"
+    echo "Fetching repo directory: $REPO_URL" >&2
+    
+    PACKAGE=$(curl -s "$REPO_URL" 2>&1 | grep -oP 'zabbix-agent2-{{ version }}-release[0-9]+\.el{{ ansible_distribution_major_version }}\.x86_64\.rpm' | head -1)
+    
+    if [ -z "$PACKAGE" ]; then
+      echo "ERROR: No zabbix-agent2 package found matching version {{ version }} in repo" >&2
+      echo "Attempted search pattern: zabbix-agent2-{{ version }}-release[0-9]+.el{{ ansible_distribution_major_version }}.x86_64.rpm" >&2
+      exit 1
+    fi
+    
+    echo "$PACKAGE"
+  register: agent_package_discovery
+  changed_when: false
+  failed_when: agent_package_discovery.rc != 0
 
-- name: Install or update Zabbix repository package
+- name: Log discovered agent package
+  ansible.builtin.debug:
+    msg: |
+      Successfully discovered Zabbix agent2 package:
+      Package: {{ agent_package_discovery.stdout }}
+      Full URL: https://repo.zabbix.com/zabbix/{{ zabbix_major_minor }}{{ zabbix_stable_path }}/rhel/{{ ansible_distribution_major_version }}/x86_64/{{ agent_package_discovery.stdout }}
+
+- name: Construct full agent2 package URL
+  ansible.builtin.set_fact:
+    zabbix_agent2_url: "https://repo.zabbix.com/zabbix/{{ zabbix_major_minor }}{{ zabbix_stable_path }}/rhel/{{ ansible_distribution_major_version }}/x86_64/{{ agent_package_discovery.stdout }}"
+
+- name: Install Zabbix Agent 2 directly from repo URL
   ansible.builtin.dnf:
-    name: "{{ zabbix_repo_rpm }}"
+    name: "{{ zabbix_agent2_url }}"
     state: present
     disable_gpg_check: true
+  register: agent_install
+  failed_when: agent_install is failed
+  retries: 2
+  delay: 5
 
-- name: Refresh package metadata
-  ansible.builtin.command: dnf clean all
-  changed_when: false
+- name: Log successful agent installation
+  ansible.builtin.debug:
+    msg: |
+      Zabbix Agent 2 installed successfully
+      Package: {{ agent_package_discovery.stdout }}
+      Changed: {{ agent_install.changed }}
+  when: agent_install is succeeded
 
-- name: Install Zabbix Agent 2 package
-  ansible.builtin.dnf:
+- name: Enable and start Zabbix Agent 2 service
+  ansible.builtin.systemd:
     name: zabbix-agent2
-    state: present
+    state: started
+    enabled: true
+    daemon_reload: true
+  register: agent_service
+  failed_when: agent_service is failed
+  retries: 2
+  delay: 5
 
 - name: Deploy zabbix_agent2 configuration
   ansible.builtin.template:
