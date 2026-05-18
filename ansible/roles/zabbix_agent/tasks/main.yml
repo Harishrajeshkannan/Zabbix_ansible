@@ -19,29 +19,22 @@
 - name: Derive version/channel values
   ansible.builtin.set_fact:
     zabbix_major_minor: "{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
-    zabbix_repo_base: "https://repo.zabbix.com/zabbix/{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}/stable/rhel/{{ ansible_distribution_major_version }}/x86_64"
+    zabbix_repo_rpm: "https://repo.zabbix.com/zabbix/{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}/stable/rhel/{{ ansible_distribution_major_version }}/x86_64/zabbix-release-latest-{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}.el{{ ansible_distribution_major_version }}.noarch.rpm"
 
-- name: Query repository to find exact zabbix-agent2 RPM filename
-  ansible.builtin.shell: |
-    curl -k -s "{{ zabbix_repo_base }}/" | grep -o "zabbix-agent2-[^/]*\.el{{ ansible_distribution_major_version }}\.x86_64\.rpm" | sort -V | tail -1
-  register: zabbix_agent2_filename
+- name: Install or update Zabbix repository package
+  ansible.builtin.dnf:
+    name: "{{ zabbix_repo_rpm }}"
+    state: present
+    disable_gpg_check: true
+
+- name: Refresh package metadata
+  ansible.builtin.command: dnf clean all
   changed_when: false
-
-- name: Validate zabbix-agent2 RPM was found
-  ansible.builtin.assert:
-    that:
-      - zabbix_agent2_filename.stdout | length > 0
-    fail_msg: "Could not find zabbix-agent2 RPM in repository at {{ zabbix_repo_base }}"
-
-- name: Set zabbix_agent2_rpm URL
-  ansible.builtin.set_fact:
-    zabbix_agent2_rpm: "{{ zabbix_repo_base }}/{{ zabbix_agent2_filename.stdout }}"
 
 - name: Install Zabbix Agent 2 package
   ansible.builtin.dnf:
-    name: "{{ zabbix_agent2_rpm }}"
+    name: zabbix-agent2
     state: present
-    disable_gpg_check: true
 
 - name: Deploy zabbix_agent2 configuration
   ansible.builtin.template:
