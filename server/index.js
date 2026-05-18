@@ -249,7 +249,21 @@ function classifyAnsibleFailureStatus(stderr = '', fallback = 500) {
   }
   return fallback;
 }
-
+function detectAnsibleFailureReason(text = '') {
+  const msg = String(text || '').toLowerCase();
+  if (msg.includes('unreachable! =>') || msg.includes(': unreachable!')) return 'host_unreachable';
+  if (msg.includes('permission denied')) return 'ssh_auth_failed';
+  if (msg.includes('connection timed out')) return 'ssh_connection_timeout';
+  if (msg.includes('no route to host')) return 'network_no_route';
+  if (msg.includes('connection refused')) return 'ssh_connection_refused';
+  if (msg.includes('could not resolve hostname')) return 'dns_resolution_failed';
+  if (msg.includes('failure downloading') && msg.includes('http error 404')) return 'repo_package_not_found';
+  if (msg.includes('sudo') && msg.includes('password')) return 'sudo_become_failed';
+  if (msg.includes('space separated string of packages')) return 'invalid_package_argument';
+  if (msg.includes('failed to validate gpg signature') || msg.includes('public key for')) return 'repo_gpg_validation_failed';
+  if (msg.includes('failed!') || msg.includes('fatal:')) return 'ansible_task_failed';
+  return 'unknown';
+}
 // ============= END HELPER FUNCTIONS =============
 
 const app = express();
@@ -632,7 +646,6 @@ app.post('/api/install-remote', async (req, res) => {
     // Invoke Ansible playbook
     const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
     const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
-
     const result = await runAnsiblePlaybook(playbookPath, host, extraVars);
 
     if (result.success) {
@@ -640,6 +653,8 @@ app.post('/api/install-remote', async (req, res) => {
     }
 
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
+    const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
+    logError(`[ANSIBLE-INSTALL] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
     return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
   } catch (error) {
     logError('[ANSIBLE-INSTALL] Failed:', error);
