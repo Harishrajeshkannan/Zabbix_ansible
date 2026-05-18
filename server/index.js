@@ -86,43 +86,65 @@ function logError(msg, err) {
  * Execute shell command with proper error handling
  */
 async function executeShellCommand(command, options = {}) {
-  const { timeout = 180000, maxBuffer = 5 * 1024 * 1024, cwd, env } = options;
+  const {
+    timeout = 180000,
+    maxBuffer = 5 * 1024 * 1024,
+    cwd,
+    env,
+    logFullOutput = false
+  } = options;
+
   const redactedCommand = redactSensitiveText(command);
-  
+
   logInfo(`[executeShellCommand] Received command: "${redactedCommand}"`);
   logInfo(`[executeShellCommand] Command length: ${command.length}`);
   logInfo(`[executeShellCommand] Timeout: ${timeout}ms`);
-  
+  if (cwd) logInfo(`[executeShellCommand] CWD: ${cwd}`);
+
+  const start = Date.now();
   try {
     const { stdout, stderr } = await execAsync(command, {
-      timeout, 
+      timeout,
       maxBuffer,
       cwd,
       env,
       shell: '/bin/bash'
     });
-    
-    logInfo(`[executeShellCommand] Execution successful`);
-    if (stdout && stdout.trim()) {
-      logInfo(`[executeShellCommand] stdout: ${truncateText(redactSensitiveText(stdout))}`);
+
+    const duration = Date.now() - start;
+    logInfo(`[executeShellCommand] Execution successful (duration: ${duration}ms)`);
+
+    if (stdout && String(stdout).trim()) {
+      const out = redactSensitiveText(stdout);
+      logInfo(`[executeShellCommand] stdout: ${truncateText(out, logFullOutput ? 20000 : 2000)}`);
     }
-    if (stderr && stderr.trim()) {
-      logInfo(`[executeShellCommand] stderr: ${truncateText(redactSensitiveText(stderr))}`);
+    if (stderr && String(stderr).trim()) {
+      const errOut = redactSensitiveText(stderr);
+      logInfo(`[executeShellCommand] stderr: ${truncateText(errOut, logFullOutput ? 20000 : 2000)}`);
     }
-    return { stdout, stderr, success: true };
+
+    return { stdout, stderr, success: true, durationMs: duration, exitCode: 0 };
   } catch (error) {
-    logError(`[executeShellCommand] Execution failed: ${error.message}`, error);
+    const duration = Date.now() - start;
+    const exitCode = error.code || error.signal || 'unknown';
+    logError(`[executeShellCommand] Execution failed (duration: ${duration}ms, exitCode: ${exitCode}): ${error.message}`, error);
+
     if (error.stdout && String(error.stdout).trim()) {
-      logError(`[executeShellCommand] stdout: ${truncateText(redactSensitiveText(error.stdout))}`);
+      const out = redactSensitiveText(error.stdout);
+      logError(`[executeShellCommand] stdout: ${truncateText(out, logFullOutput ? 20000 : 2000)}`);
     }
     if (error.stderr && String(error.stderr).trim()) {
-      logError(`[executeShellCommand] stderr: ${truncateText(redactSensitiveText(error.stderr))}`);
+      const errOut = redactSensitiveText(error.stderr);
+      logError(`[executeShellCommand] stderr: ${truncateText(errOut, logFullOutput ? 20000 : 2000)}`);
     }
-    return { 
-      stdout: error.stdout || '', 
-      stderr: error.stderr || '', 
-      success: false, 
-      error: error.message 
+
+    return {
+      stdout: error.stdout || '',
+      stderr: error.stderr || '',
+      success: false,
+      error: error.message,
+      durationMs: duration,
+      exitCode: exitCode
     };
   }
 }
@@ -195,9 +217,10 @@ async function runAnsiblePlaybook(playbookPath, host, extraVars = {}) {
   
   const result = await executeShellCommand(cmd, {
     timeout: 10 * 60 * 1000,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer: 20 * 1024 * 1024,
     cwd: ansibleRoot,
-    env: envVars
+    env: envVars,
+    logFullOutput: true
   });
   return result;
 }
