@@ -341,7 +341,6 @@ function App() {
     }
 
     if (!isBatch) {
-      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
       setProgressHost(selectedHost || installData);
       setProgressVersion(installData.version);
       setProgressRequestId(null);
@@ -349,7 +348,7 @@ function App() {
 
       try {
         await installRemoteAgent(installData);
-        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
+        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`);
         setTimeout(() => {
           loadData();
         }, 2000);
@@ -365,7 +364,7 @@ function App() {
       return;
     }
 
-    const toastId = toast.loading(`${actionVerb} on 1/${targets.length}: ${targets[0].hostname}`);
+    // Use modal-based progress for installs; avoid creating the old simple "installing" toast
     const failures = [];
     let successCount = 0;
 
@@ -375,7 +374,7 @@ function App() {
         ? (target.status === 'No Agent' ? 'Installing' : 'Updating')
         : actionVerb;
 
-      toast.loading(`${perHostVerb} on ${i + 1}/${targets.length}: ${target.hostname}`, { id: toastId });
+      // progress shown per-host via modal / final summary toasts, skip per-host loading toast
 
       const payload = {
         host: resolvePreferredHost(target),
@@ -395,17 +394,14 @@ function App() {
     }
 
     if (failures.length === 0) {
-      toast.success(`Batch ${actionPastTense} completed on ${successCount}/${targets.length} hosts`, { id: toastId });
+      toast.success(`Batch ${actionPastTense} completed on ${successCount}/${targets.length} hosts`);
     } else {
       const failureSummary = failures
         .slice(0, 3)
         .map((item) => `${item.hostname}: ${item.message}`)
         .join(' | ');
 
-      toast.error(
-        `Batch finished with failures (${successCount}/${targets.length} successful)`,
-        { id: toastId, description: failureSummary }
-      );
+      toast.error(`Batch finished with failures (${successCount}/${targets.length} successful)`, { description: failureSummary });
     }
 
     setSelectedHostIds([]);
@@ -450,9 +446,7 @@ function App() {
       const downloadResult = await downloadAgentPackage(selectedVersion);
       console.log(`Download completed: ${downloadResult.path}`);
       
-      toast.loading(`${action === 'install' ? 'Installing' : 'Updating'} Zabbix Agent ${selectedVersion} on ${host.hostname}...`, {
-        id: toastId,
-      });
+      // avoid creating the old single-line "Installing ... on host" toast; keep download toast updated instead
       
       // Log the action to a file via backend
       await logAgentAction(action, {
