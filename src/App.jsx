@@ -342,6 +342,11 @@ function App() {
 
     if (!isBatch) {
       const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
+      setProgressHost(selectedHost || installData);
+      setProgressVersion(installData.version);
+      setProgressRequestId(null);
+      setProgressModalOpen(true);
+
       try {
         await installRemoteAgent(installData);
         toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
@@ -351,6 +356,11 @@ function App() {
       } catch (error) {
         toast.error(`Installation failed: ${error.message}`);
         throw error;
+      } finally {
+        setProgressModalOpen(false);
+        setProgressRequestId(null);
+        setProgressHost(null);
+        setProgressVersion(null);
       }
       return;
     }
