@@ -8,7 +8,7 @@ const Header = ({ onRefresh, loading, lastUpdated, onNavigate, currentView }) =>
       <div className="header-content">
         <div className="header-left">
           <div className="header-titles">
-            <h1 className="header-title">Zabbix Agent Management</h1>
+            <h1 className="header-title">Zabbix Agent Management 2</h1>
           </div>
         </div>
         <div className="header-right">

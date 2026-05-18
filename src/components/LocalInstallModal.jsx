@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ZABBIX_CONFIG } from '../config/zabbixConfig';
 import './LocalInstallModal.css';
 
 const resolvePreferredHost = (host) => {
@@ -21,9 +22,9 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   const [formData, setFormData] = useState({
     host: resolvePreferredHost(selectedHost),
     version: latestVersion,
-    serverIP: '',
-    serverPort: '10051',
-    listenerPort: '10050',
+    serverIP: ZABBIX_CONFIG.zabbixServerIP,
+    serverPort: ZABBIX_CONFIG.zabbixServerPort,
+    listenerPort: ZABBIX_CONFIG.agentListenerPort,
     hostname: selectedHost?.hostname || '',
     usePSK: false,
     psk: '',

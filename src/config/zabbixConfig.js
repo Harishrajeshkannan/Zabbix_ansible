@@ -10,7 +10,17 @@ export const ZABBIX_CONFIG = {
   apiToken: import.meta.env.VITE_ZABBIX_API_TOKEN || '',
   
   // Latest Zabbix agent version (update this manually or fetch from your deployment server)
-  latestAgentVersion: '7.4.7',
+    latestAgentVersion: '7.4.7',
+
+    // Zabbix server IP/hostname for agent configuration
+    // Used to autofill the serverIP field in agent installation forms
+    zabbixServerIP: import.meta.env.VITE_ZABBIX_SERVER_IP || '10.130.56.8',
+
+    // Zabbix server port for agent communication
+    zabbixServerPort: import.meta.env.VITE_ZABBIX_SERVER_PORT || '10051',
+
+    // Zabbix agent listener port
+    agentListenerPort: import.meta.env.VITE_AGENT_LISTENER_PORT || '10050',
 };
 
 // Validate configuration
