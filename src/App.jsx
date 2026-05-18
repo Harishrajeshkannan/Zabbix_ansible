@@ -13,6 +13,7 @@ import InstallProgressModal from './components/InstallProgressModal';
 import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
+import { resolveBackendApiUrl } from './services/apiBase';
 import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
