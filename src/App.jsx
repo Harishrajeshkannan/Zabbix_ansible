@@ -341,6 +341,7 @@ function App() {
     }
 
     if (!isBatch) {
+      const toastId = toast.loading(`${actionVerb} Zabbix Agent on ${installData.host} via Ansible...`);
       setProgressHost(selectedHost || installData);
       setProgressVersion(installData.version);
       setProgressRequestId(null);
@@ -348,7 +349,7 @@ function App() {
 
       try {
         await installRemoteAgent(installData);
-        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`);
+        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`, { id: toastId });
         setTimeout(() => {
           loadData();
         }, 2000);
@@ -446,7 +447,9 @@ function App() {
       const downloadResult = await downloadAgentPackage(selectedVersion);
       console.log(`Download completed: ${downloadResult.path}`);
       
-      // avoid creating the old single-line "Installing ... on host" toast; keep download toast updated instead
+      toast.loading(`${action === 'install' ? 'Installing' : 'Updating'} Zabbix Agent ${selectedVersion} on ${host.hostname}...`, {
+        id: toastId,
+      });
       
       // Log the action to a file via backend
       await logAgentAction(action, {
