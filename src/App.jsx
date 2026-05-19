@@ -325,6 +325,9 @@ function App() {
   const handleLocalInstall = async (installData) => {
     const action = actionType || 'install';
     const isMixedAction = action === 'install-update';
+    const actionVerb = isMixedAction
+      ? 'Installing/Updating'
+      : (action === 'install' ? 'Installing' : 'Updating');
     const actionPastTense = isMixedAction
       ? 'installed/updated'
       : (action === 'install' ? 'installed' : 'updated');
@@ -337,23 +340,15 @@ function App() {
       throw new Error('No host selected');
     }
 
-    const installPayload = {
-      ...installData,
-      serverIP: installData.serverIP || ZABBIX_CONFIG.zabbixServerIP,
-      serverPort: installData.serverPort || ZABBIX_CONFIG.zabbixServerPort,
-      listenerPort: installData.listenerPort || ZABBIX_CONFIG.agentListenerPort,
-      hostname: installData.hostname || selectedHost?.hostname || targets[0]?.hostname || '',
-    };
-
     if (!isBatch) {
-      setProgressHost(selectedHost || installPayload);
-      setProgressVersion(installPayload.version);
+      setProgressHost(selectedHost || installData);
+      setProgressVersion(installData.version);
       setProgressRequestId(null);
       setProgressModalOpen(true);
 
       try {
-        await installRemoteAgent(installPayload);
-        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installPayload.host}!`);
+        await installRemoteAgent(installData);
+        toast.success(`Zabbix Agent ${actionPastTense} successfully on ${installData.host}!`);
         setTimeout(() => {
           loadData();
         }, 2000);
@@ -380,13 +375,14 @@ function App() {
 
     const results = [];
 
-    for (const target of finalTargets) {
+    for (let i = 0; i < finalTargets.length; i++) {
+      const target = finalTargets[i];
       const payload = {
         host: resolvePreferredHost(target),
-        version: installPayload.version,
-        serverIP: installPayload.serverIP,
-        serverPort: installPayload.serverPort,
-        listenerPort: installPayload.listenerPort,
+        version: installData.version,
+        serverIP: installData.serverIP,
+        serverPort: installData.serverPort,
+        listenerPort: installData.listenerPort,
         hostname: target.hostname || resolvePreferredHost(target),
       };
 

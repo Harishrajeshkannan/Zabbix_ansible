@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ZABBIX_CONFIG } from '../config/zabbixConfig';
 import './LocalInstallModal.css';
 
 const resolvePreferredHost = (host) => {
@@ -21,6 +22,13 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
   const [formData, setFormData] = useState({
     host: resolvePreferredHost(selectedHost),
     version: latestVersion,
+    serverIP: ZABBIX_CONFIG.zabbixServerIP,
+    serverPort: ZABBIX_CONFIG.zabbixServerPort,
+    listenerPort: ZABBIX_CONFIG.agentListenerPort,
+    hostname: selectedHost?.hostname || '',
+    usePSK: false,
+    psk: '',
+    pskIdentity: ''
   });
   const [installing, setInstalling] = useState(false);
   const lastInitKeyRef = useRef('');
@@ -38,6 +46,7 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
     setFormData(prev => ({
       ...prev,
       host: resolvePreferredHost(selectedHost),
+      hostname: selectedHost.hostname || '',
       version: action === 'update' && selectedHost.agentVersion
         ? selectedHost.agentVersion
         : latestVersion
@@ -96,21 +105,24 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               </div>
             )}
 
-            <div className="form-group">
-              <label htmlFor="host">Target Server</label>
-              <input
-                type="text"
-                id="host"
-                name="host"
-                value={formData.host}
-                readOnly
-                required
-              />
-            </div>
+            {!isBatchMode && (
+              <div className="form-group">
+                <label htmlFor="host">Remote Server IP/Hostname *</label>
+                <input
+                  type="text"
+                  id="host"
+                  name="host"
+                  value={formData.host}
+                  onChange={handleChange}
+                  placeholder="192.168.1.100 or server.example.com"
+                  required
+                />
+              </div>
+            )}
           </div>
 
           <div className="form-section">
-            <h3>Agent Selection</h3>
+            <h3>Zabbix Agent Configuration</h3>
 
             <div className="form-group">
               <label htmlFor="version">Agent Version</label>
@@ -127,7 +139,103 @@ const LocalInstallModal = ({ isOpen, onClose, onInstall, availableVersions, late
               </select>
             </div>
 
+            <div className="form-group">
+              <label htmlFor="serverIP">Zabbix Server IP/Hostname *</label>
+              <input
+                type="text"
+                id="serverIP"
+                name="serverIP"
+                value={formData.serverIP}
+                onChange={handleChange}
+                placeholder="192.168.1.100 or zabbix.example.com"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="serverPort">Server Port</label>
+              <input
+                type="number"
+                id="serverPort"
+                name="serverPort"
+                value={formData.serverPort}
+                onChange={handleChange}
+                min="1"
+                max="65535"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="listenerPort">Listener Port</label>
+              <input
+                type="number"
+                id="listenerPort"
+                name="listenerPort"
+                value={formData.listenerPort}
+                onChange={handleChange}
+                min="1"
+                max="65535"
+                required
+              />
+            </div>
+
+            {!isBatchMode && (
+              <div className="form-group">
+                <label htmlFor="hostname">Agent Hostname (for Zabbix)</label>
+                <input
+                  type="text"
+                  id="hostname"
+                  name="hostname"
+                  value={formData.hostname}
+                  onChange={handleChange}
+                  placeholder="Hostname as it appears in Zabbix"
+                  required
+                />
+              </div>
+            )}
           </div>
+
+          <div className="form-group checkbox-group">
+            <label>
+              <input
+                type="checkbox"
+                name="usePSK"
+                checked={formData.usePSK}
+                onChange={handleChange}
+              />
+              <span>Use PSK Encryption</span>
+            </label>
+          </div>
+
+          {formData.usePSK && (
+            <>
+              <div className="form-group">
+                <label htmlFor="pskIdentity">PSK Identity</label>
+                <input
+                  type="text"
+                  id="pskIdentity"
+                  name="pskIdentity"
+                  value={formData.pskIdentity}
+                  onChange={handleChange}
+                  placeholder="PSK Identity"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="psk">PSK (Pre-Shared Key)</label>
+                <textarea
+                  id="psk"
+                  name="psk"
+                  value={formData.psk}
+                  onChange={handleChange}
+                  placeholder="Enter PSK in hex format"
+                  rows="3"
+                />
+                <small>Enter the pre-shared key in hexadecimal format (64 characters)</small>
+              </div>
+            </>
+          )}
 
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose} disabled={installing}>
