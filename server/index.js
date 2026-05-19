@@ -311,6 +311,31 @@ app.use(express.json());
 
 // Logs directory - create in project root
 const LOGS_DIR = path.join(__dirname, 'agent-logs');
+const INSTALL_LOGS_DIR = path.join(LOGS_DIR, 'installs');
+
+async function ensureInstallLogsDir() {
+  await fs.mkdir(INSTALL_LOGS_DIR, { recursive: true }).catch(() => {});
+}
+
+function buildInstallLogFilename(hostname, requestId) {
+  const safeHostname = String(hostname || 'unknown-host')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '_');
+  const safeRequestId = String(requestId || Date.now())
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '_');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${safeHostname}_install_${safeRequestId}_${timestamp}.txt`;
+}
+
+async function writeInstallLogFile({ hostname, requestId, content }) {
+  await ensureInstallLogsDir();
+  const filename = buildInstallLogFilename(hostname, requestId);
+  const fullPath = path.join(INSTALL_LOGS_DIR, filename);
+  await fs.writeFile(fullPath, content, 'utf8');
+  await executeShellCommand(`chmod 777 "${fullPath}"`);
+  return { filename, fullPath };
+}
 
 /**
  * Create log file using shell command
@@ -665,6 +690,7 @@ app.post('/api/install-remote', async (req, res) => {
   try {
     const host = resolveTargetHost(req.body || {});
     const { version, serverIP, serverPort = 10051, listenerPort = 10050, hostname } = req.body;
+    const requestId = String(req.body?.requestId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
     if (!version || !serverIP || !hostname) {
       return res.status(400).json({ error: 'Missing required fields', details: 'version, serverIP and hostname are required' });
@@ -679,15 +705,39 @@ app.post('/api/install-remote', async (req, res) => {
     const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
     const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
     const result = await runAnsiblePlaybook(playbookPath, host, extraVars);
+    const logContent = [
+      '========================================',
+      'Zabbix Agent Install Run',
+      '========================================',
+      `Request ID: ${requestId}`,
+      `Host: ${host}`,
+      `Hostname: ${hostname}`,
+      `Version: ${version}`,
+      `Server IP: ${serverIP}`,
+      `Server Port: ${serverPort}`,
+      `Listener Port: ${listenerPort}`,
+      `Timestamp: ${new Date().toISOString()}`,
+      `Status: ${result.success ? 'SUCCESS' : 'FAILED'}`,
+      '',
+      '--- STDOUT ---',
+      result.stdout || '',
+      '',
+      '--- STDERR ---',
+      result.stderr || result.error || '',
+      '',
+      '========================================',
+      ''
+    ].join('\n');
+    const installLog = await writeInstallLogFile({ hostname, requestId, content: logContent });
 
     if (result.success) {
-      return res.json({ success: true, message: `Ansible playbook ran for ${host}`, output: result.stdout });
+      return res.json({ success: true, message: `Ansible playbook ran for ${host}`, output: result.stdout, logFile: installLog.filename, fullPath: installLog.fullPath });
     }
 
     const status = classifyAnsibleFailureStatus(result.stderr || result.error, 500);
     const reason = detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
     logError(`[ANSIBLE-INSTALL] Completed with failure host=${host} httpStatus=${status} reason=${reason} exitCode=${result.exitCode ?? 'unknown'} durationMs=${result.durationMs ?? 'unknown'}`);
-    return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout });
+    return res.status(status).json({ success: false, error: 'Playbook failed', details: result.stderr || result.error, output: result.stdout, logFile: installLog.filename, fullPath: installLog.fullPath });
   } catch (error) {
     logError('[ANSIBLE-INSTALL] Failed:', error);
     return res.status(500).json({ success: false, error: 'Installation failed', details: error.message });

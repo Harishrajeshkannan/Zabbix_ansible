@@ -52,6 +52,13 @@ Create a log file for install/update action
 }
 ```
 
+### POST /api/install-remote
+Runs the Ansible installation playbook for a single host and writes a dedicated log file for that request.
+
+The response includes `logFile` and `fullPath` so each install run can be tracked separately.
+
+Install run logs are written under `agent-logs/installs/`.
+
 ### GET /api/logs
 Get list of all log files
 
