@@ -21,6 +21,16 @@
     zabbix_major_minor: "{{ version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
     zabbix_stable_path: "{{ '/stable' if ((version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1')) | float) >= 7.2 else '' }}"
 
+- name: Log install context
+  ansible.builtin.debug:
+    msg:
+      - "Target host: {{ hostname }}"
+      - "Target host address: {{ host }}"
+      - "Requested agent version: {{ version }}"
+      - "Detected OS major version: {{ ansible_distribution_major_version }}"
+      - "Resolved Zabbix major.minor: {{ zabbix_major_minor }}"
+      - "Resolved stable path: {{ zabbix_stable_path | default('') }}"
+
 - name: Discover Zabbix agent2 package in repo
   ansible.builtin.shell: |
     set -e
@@ -69,6 +79,20 @@
       Zabbix Agent 2 installed successfully
       Package: {{ agent_package_discovery.stdout }}
       Changed: {{ agent_install.changed }}
+  when: agent_install is succeeded
+
+- name: Verify installed Zabbix Agent package version
+  ansible.builtin.command: rpm -q zabbix-agent2
+  register: installed_agent_package
+  changed_when: false
+  failed_when: false
+  when: agent_install is succeeded
+
+- name: Log installed agent package version
+  ansible.builtin.debug:
+    msg: |
+      Installed package verification:
+      {{ installed_agent_package.stdout | default('package query returned no output') }}
   when: agent_install is succeeded
 
 - name: Enable and start Zabbix Agent 2 service

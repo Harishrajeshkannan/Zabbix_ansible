@@ -300,6 +300,87 @@ function detectAnsibleFailureReason(text = '') {
   if (msg.includes('failed!') || msg.includes('fatal:')) return 'ansible_task_failed';
   return 'unknown';
 }
+
+function extractAnsibleTaskTimeline(stdout = '') {
+  const lines = String(stdout || '').split(/\r?\n/);
+  const timeline = [];
+  let currentTask = null;
+
+  for (const line of lines) {
+    const taskMatch = line.match(/^TASK \[(.+?)\]/);
+    if (taskMatch) {
+      currentTask = taskMatch[1];
+      continue;
+    }
+
+    const statusMatch = line.match(/^\s*(ok|changed|skipping|fatal|failed|ignored):/i);
+    if (currentTask && statusMatch) {
+      timeline.push(`${currentTask} :: ${statusMatch[1].toUpperCase()}`);
+      if (/^(fatal|failed)$/i.test(statusMatch[1])) {
+        break;
+      }
+      currentTask = null;
+    }
+  }
+
+  return timeline;
+}
+
+function extractInstallDebugContext(stdout = '') {
+  const text = String(stdout || '');
+  const packageMatch = text.match(/Package:\s*(.+)/i);
+  const urlMatch = text.match(/Full URL:\s*(.+)/i);
+  const taskMatches = extractAnsibleTaskTimeline(text);
+  const failedLine = text
+    .split(/\r?\n/)
+    .find((line) => /fatal:|FAILED!|failed_when_result/i.test(line)) || '';
+
+  return {
+    packageName: packageMatch ? packageMatch[1].trim() : '',
+    packageUrl: urlMatch ? urlMatch[1].trim() : '',
+    taskTimeline: taskMatches,
+    failedLine: failedLine.trim()
+  };
+}
+
+function buildInstallLogContent({ requestId, host, hostname, version, serverIP, serverPort, listenerPort, result }) {
+  const debugContext = extractInstallDebugContext(result.stdout);
+  const failureReason = result.success ? 'none' : detectAnsibleFailureReason(`${result.stderr || ''}\n${result.stdout || ''}\n${result.error || ''}`);
+
+  return [
+    '========================================',
+    'Zabbix Agent Install Run',
+    '========================================',
+    `Request ID: ${requestId}`,
+    `Host: ${host}`,
+    `Hostname: ${hostname}`,
+    `Requested Version: ${version}`,
+    `Server IP: ${serverIP}`,
+    `Server Port: ${serverPort}`,
+    `Listener Port: ${listenerPort}`,
+    `Timestamp: ${new Date().toISOString()}`,
+    `Status: ${result.success ? 'SUCCESS' : 'FAILED'}`,
+    `Failure Reason: ${failureReason}`,
+    '',
+    '--- Resolved Package Context ---',
+    `Package Name: ${debugContext.packageName || 'n/a'}`,
+    `Package URL: ${debugContext.packageUrl || 'n/a'}`,
+    `Task Count: ${debugContext.taskTimeline.length}`,
+    `Failed Line: ${debugContext.failedLine || 'n/a'}`,
+    '',
+    '--- Task Timeline ---',
+    ...(debugContext.taskTimeline.length > 0 ? debugContext.taskTimeline.map((line) => `* ${line}`) : ['* No task timeline could be parsed from stdout']),
+    '',
+    '--- STDOUT ---',
+    result.stdout || '',
+    '',
+    '--- STDERR ---',
+    result.stderr || result.error || '',
+    '',
+    '========================================',
+    ''
+  ].join('\n');
+}
 // ============= END HELPER FUNCTIONS =============
 
 const app = express();
@@ -705,29 +786,16 @@ app.post('/api/install-remote', async (req, res) => {
     const playbookPath = path.resolve(__dirname, '../ansible/playbooks/install.yml');
     const extraVars = { host, version, serverIP, serverPort, listenerPort, hostname };
     const result = await runAnsiblePlaybook(playbookPath, host, extraVars);
-    const logContent = [
-      '========================================',
-      'Zabbix Agent Install Run',
-      '========================================',
-      `Request ID: ${requestId}`,
-      `Host: ${host}`,
-      `Hostname: ${hostname}`,
-      `Version: ${version}`,
-      `Server IP: ${serverIP}`,
-      `Server Port: ${serverPort}`,
-      `Listener Port: ${listenerPort}`,
-      `Timestamp: ${new Date().toISOString()}`,
-      `Status: ${result.success ? 'SUCCESS' : 'FAILED'}`,
-      '',
-      '--- STDOUT ---',
-      result.stdout || '',
-      '',
-      '--- STDERR ---',
-      result.stderr || result.error || '',
-      '',
-      '========================================',
-      ''
-    ].join('\n');
+    const logContent = buildInstallLogContent({
+      requestId,
+      host,
+      hostname,
+      version,
+      serverIP,
+      serverPort,
+      listenerPort,
+      result
+    });
     const installLog = await writeInstallLogFile({ hostname, requestId, content: logContent });
 
     if (result.success) {
