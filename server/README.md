@@ -48,7 +48,7 @@ Create a log file for install/update action
   "success": true,
   "message": "Installed successfully",
   "logFile": "server1_install_2025-12-16T10-30-00.txt",
-  "fullPath": "/path/to/agent-logs/server1_install_2025-12-16T10-30-00.txt"
+  "fullPath": "/path/to/server/logs/installs/server1_install_2025-12-16T10-30-00.txt"
 }
 ```
 
@@ -57,7 +57,7 @@ Runs the Ansible installation playbook for a single host and writes a dedicated 
 
 The response includes `logFile` and `fullPath` so each install run can be tracked separately.
 
-Install run logs are written under `agent-logs/installs/`.
+Install run logs are written under `server/logs/installs/`.
 
 ### GET /api/logs
 Get list of all log files
