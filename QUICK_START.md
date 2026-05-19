@@ -202,7 +202,7 @@ npm run dev:full
 - **Sudo Passwords**: Stored temporarily in memory only during installation
 - **PSK Keys**: Generated locally, not transmitted to external servers
 - **Network**: All RHEL package installations use official Zabbix repositories
-- **Logs**: Installation logs are stored locally in `server/logs/installs/` directory
+- **Logs**: Installation logs are stored locally in `server/logs/` directory
 
 ---
 

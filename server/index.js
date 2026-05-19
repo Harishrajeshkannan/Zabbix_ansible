@@ -311,7 +311,7 @@ app.use(express.json());
 
 // Logs directory - create in project root
 const LOGS_DIR = path.join(__dirname, 'agent-logs');
-const INSTALL_LOGS_DIR = path.join(__dirname, 'logs', 'installs');
+const INSTALL_LOGS_DIR = path.join(__dirname, 'logs');
 
 async function ensureInstallLogsDir() {
   await fs.mkdir(INSTALL_LOGS_DIR, { recursive: true }).catch(() => {});

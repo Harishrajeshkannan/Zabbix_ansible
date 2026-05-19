@@ -56,6 +56,8 @@
     name: "{{ zabbix_agent2_url }}"
     state: present
     disable_gpg_check: true
+    disablerepo:
+      - epel
   register: agent_install
   failed_when: agent_install is failed
   retries: 2

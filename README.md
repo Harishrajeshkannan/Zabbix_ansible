@@ -94,7 +94,7 @@ Zabbix-Deployment-Portal/
 │   ├── index.js           # Main server file (Ansible controller)
 │   └── SECURITY_SETUP.md  # Security & authentication guide
 ├── ansible/               # Ansible playbooks and roles
-├── server/logs/installs/  # Per-install logs
+├── server/logs/            # Per-install logs
 ├── package.json
 └── README.md
 ```
