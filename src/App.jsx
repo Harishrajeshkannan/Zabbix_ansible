@@ -14,7 +14,7 @@ import LogsPage from './pages/LogsPage';
 import RemoteFilesPage from './pages/RemoteFilesPage';
 import { fetchAllData, refreshHostData } from './services/dataService';
 import { resolveBackendApiUrl } from './services/apiBase';
-import { logAgentAction, downloadAgentPackage, installRemoteAgent, installRemoteAgents, restartRemoteAgent } from './services/backendService';
+import { logAgentAction, downloadAgentPackage, installRemoteAgent, restartRemoteAgent } from './services/backendService';
 import { ZABBIX_CONFIG } from './config/zabbixConfig';
 import './App.css';
 
@@ -378,31 +378,33 @@ function App() {
       return;
     }
 
-    const batchPayload = {
-      hosts: finalTargets.map((target) => ({
+    const results = [];
+
+    for (const target of finalTargets) {
+      const payload = {
         host: resolvePreferredHost(target),
-        hostname: target.hostname,
-        ip: target.ip,
-      })),
-      version: installPayload.version,
-      serverIP: installPayload.serverIP,
-      serverPort: installPayload.serverPort,
-      listenerPort: installPayload.listenerPort,
-    };
+        version: installPayload.version,
+        serverIP: installPayload.serverIP,
+        serverPort: installPayload.serverPort,
+        listenerPort: installPayload.listenerPort,
+        hostname: target.hostname || resolvePreferredHost(target),
+      };
 
-    const batchResult = await installRemoteAgents(batchPayload);
+      try {
+        await installRemoteAgent(payload);
+        results.push({ hostname: payload.hostname, success: true });
+      } catch (error) {
+        results.push({ hostname: payload.hostname, success: false, error: error?.message || String(error) });
+      }
+    }
 
-    const successCount = batchResult?.summary?.successCount ?? 0;
-    const failureCount = batchResult?.summary?.failureCount ?? 0;
+    const successCount = results.filter((item) => item.success).length;
+    const failures = results.filter((item) => !item.success);
 
-    if (failureCount === 0) {
+    if (failures.length === 0) {
       toast.success(`Batch ${actionPastTense} completed on ${successCount}/${finalTargets.length} hosts`);
     } else {
-      const failureSummary = (batchResult?.results || [])
-        .filter((item) => !item.success)
-        .slice(0, 3)
-        .map((item) => `${item.hostname || item.host}: ${item.error || item.reason || 'Unknown error'}`)
-        .join(' | ');
+      const failureSummary = failures.slice(0, 3).map((item) => `${item.hostname}: ${item.error}`).join(' | ');
       toast.error(`Batch finished with failures (${successCount}/${finalTargets.length} successful)`, { description: failureSummary });
     }
 

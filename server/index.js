@@ -27,24 +27,37 @@ const upload = multer({
 
 // ============= SIMPLE FILE + CONSOLE LOGGER =============
 const LOG_DIR = path.join(__dirname, 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'server.log');
+const EVENT_LOG_DIR = path.join(LOG_DIR, 'events');
 
 async function ensureLogDir() {
   try {
     await fs.mkdir(LOG_DIR, { recursive: true });
+    await fs.mkdir(EVENT_LOG_DIR, { recursive: true });
     await fs.chmod(LOG_DIR, 0o777);
+    await fs.chmod(EVENT_LOG_DIR, 0o777);
   } catch {
     // ignore mkdir errors
   }
 }
 
-async function writeServerLog(level, message) {
+async function writeLogEntry(level, message) {
   try {
     await ensureLogDir();
-    const ts = new Date().toISOString();
-    const line = `${ts} [${level}] ${typeof message === 'string' ? message : JSON.stringify(message)}\n`;
-    await fs.appendFile(LOG_FILE, line);
-    await fs.chmod(LOG_FILE, 0o777);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeLevel = String(level || 'INFO').toLowerCase();
+    const filename = `${ts}-${safeLevel}.log`;
+    const filePath = path.join(EVENT_LOG_DIR, filename);
+    const line = `${new Date().toISOString()} [${level}] ${typeof message === 'string' ? message : JSON.stringify(message)}\n`;
+    await fs.writeFile(filePath, line, 'utf8');
+    await fs.chmod(filePath, 0o666);
+  } catch {
+    console.error('Failed to write event log');
+  }
+}
+
+async function writeServerLog(level, message) {
+  try {
+    await writeLogEntry(level, message);
   } catch {
     // writing logs should not break the app
     console.error('Failed to write server log');
@@ -908,8 +921,14 @@ app.get('/api/install-progress/:requestId', async (req, res) => {
   const { requestId } = req.params;
   
   try {
-    // Read the server log file
-    const logContent = await fs.readFile(LOG_FILE, 'utf-8').catch(() => '');
+    // Read the event log files and stitch them together for progress parsing
+    const eventFiles = await fs.readdir(EVENT_LOG_DIR).catch(() => []);
+    const logContent = await Promise.all(
+      eventFiles.map(async (fileName) => {
+        const filePath = path.join(EVENT_LOG_DIR, fileName);
+        return fs.readFile(filePath, 'utf-8').catch(() => '');
+      })
+    ).then((chunks) => chunks.join('\n'));
     const lines = logContent.split('\n');
     
     // Filter lines for this requestId
@@ -1004,6 +1023,7 @@ app.listen(PORT, async () => {
   logInfo(`🔐 Env source: ${ENV_PATH}`);
   logInfo(`🔐 Ansible playbook command: ${ANSIBLE_PLAYBOOK_CMD}`);
   logInfo(`📁 Logs directory: ${LOG_DIR}`);
+  logInfo(`📁 Event logs directory: ${EVENT_LOG_DIR}`);
   logInfo(`📦 Downloads directory: ${DOWNLOADS_DIR}`);
   logInfo(`📝 Installation: Zabbix Agent 2 via YUM/DNF repositories`);
   logInfo('');
