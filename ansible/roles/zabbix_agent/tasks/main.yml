@@ -61,11 +61,26 @@
   ansible.builtin.set_fact:
     zabbix_agent2_url: "https://repo.zabbix.com/zabbix/{{ zabbix_major_minor }}{{ zabbix_stable_path }}/rhel/{{ ansible_distribution_major_version }}/x86_64/{{ agent_package_discovery.stdout }}"
 
+- name: Check currently installed Zabbix Agent package
+  ansible.builtin.command: rpm -q zabbix-agent2
+  register: installed_agent_before
+  changed_when: false
+  failed_when: false
+  args:
+    warn: false
+
+- name: Log currently installed package before install
+  ansible.builtin.debug:
+    msg: |
+      Installed package before install:
+      {{ installed_agent_before.stdout | default('not installed') }}
+
 - name: Install Zabbix Agent 2 directly from repo URL
   ansible.builtin.dnf:
     name: "{{ zabbix_agent2_url }}"
     state: present
     disable_gpg_check: true
+    allow_downgrade: true
     disablerepo:
       - epel
   register: agent_install
@@ -86,6 +101,8 @@
   register: installed_agent_package
   changed_when: false
   failed_when: false
+  args:
+    warn: false
   when: agent_install is succeeded
 
 - name: Log installed agent package version
@@ -93,6 +110,15 @@
     msg: |
       Installed package verification:
       {{ installed_agent_package.stdout | default('package query returned no output') }}
+  when: agent_install is succeeded
+
+- name: Assert requested version is installed
+  ansible.builtin.assert:
+    that:
+      - installed_agent_package.stdout is search('^zabbix-agent2-' ~ version ~ '-release[0-9]+\\.el' ~ ansible_distribution_major_version ~ '\\.')
+    fail_msg: >-
+      Requested version {{ version }} but installed package is {{ installed_agent_package.stdout | default('unknown') }}.
+      This means the target did not converge to the requested package version.
   when: agent_install is succeeded
 
 - name: Enable and start Zabbix Agent 2 service

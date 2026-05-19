@@ -328,16 +328,19 @@ function extractAnsibleTaskTimeline(stdout = '') {
 
 function extractInstallDebugContext(stdout = '') {
   const text = String(stdout || '');
-  const packageMatch = text.match(/Package:\s*(.+)/i);
-  const urlMatch = text.match(/Full URL:\s*(.+)/i);
+  const packageMatch = text.match(/zabbix-agent2-[0-9.]+-release[0-9]+\.el[0-9]+\.x86_64\.rpm/i);
+  const urlMatch = text.match(/https?:\/\/repo\.zabbix\.com\/[^\s"\\]+\.rpm/i);
+  const installedMatch = text.match(/Installed package verification:\s*\\n([^"\n\\]+)/i)
+    || text.match(/Installed package verification:\s*\n([^\n]+)/i);
   const taskMatches = extractAnsibleTaskTimeline(text);
   const failedLine = text
     .split(/\r?\n/)
     .find((line) => /fatal:|FAILED!|failed_when_result/i.test(line)) || '';
 
   return {
-    packageName: packageMatch ? packageMatch[1].trim() : '',
-    packageUrl: urlMatch ? urlMatch[1].trim() : '',
+    packageName: packageMatch ? packageMatch[0].trim() : '',
+    packageUrl: urlMatch ? urlMatch[0].trim() : '',
+    installedPackage: installedMatch ? installedMatch[1].trim() : '',
     taskTimeline: taskMatches,
     failedLine: failedLine.trim()
   };
@@ -365,6 +368,8 @@ function buildInstallLogContent({ requestId, host, hostname, version, serverIP, 
     '--- Resolved Package Context ---',
     `Package Name: ${debugContext.packageName || 'n/a'}`,
     `Package URL: ${debugContext.packageUrl || 'n/a'}`,
+    `Installed Package: ${debugContext.installedPackage || 'n/a'}`,
+    `Version Match Requested: ${debugContext.installedPackage ? (debugContext.installedPackage.includes(`-${version}-`) ? 'yes' : 'no') : 'unknown'}`,
     `Task Count: ${debugContext.taskTimeline.length}`,
     `Failed Line: ${debugContext.failedLine || 'n/a'}`,
     '',
