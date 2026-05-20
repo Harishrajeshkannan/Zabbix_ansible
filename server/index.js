@@ -978,57 +978,478 @@ app.post('/api/cleanup-temp', async (req, res) => {
   }
 });
 
+// ============= REMOTE FILE MANAGER HELPERS =============
+
+/**
+ * Validate and normalize a relative path to stay within /etc/zabbix
+ * @param {string} relativePath - The relative path from /etc/zabbix
+ * @returns {string} Normalized path or throws error
+ */
+function validateRelativePath(relativePath) {
+  const normalized = String(relativePath || '')
+    .trim()
+    .replace(/^\/+/, '') // Remove leading slashes
+    .replace(/\/+$/, ''); // Remove trailing slashes
+  
+  // Reject absolute paths and dangerous patterns
+  if (normalized.startsWith('/') || normalized.includes('..') || normalized.includes('\0')) {
+    throw new Error('Invalid path: must be relative and cannot contain .. or null bytes');
+  }
+  
+  if (normalized === '' || normalized === '.') {
+    return ''; // Root of /etc/zabbix
+  }
+  
+  // Validate each path component
+  const parts = normalized.split('/');
+  for (const part of parts) {
+    if (!part || part === '.' || part === '..') {
+      throw new Error('Invalid path component');
+    }
+    // Reject shell metacharacters and control chars
+    if (!/^[a-zA-Z0-9._-]+$/.test(part)) {
+      throw new Error(`Invalid path component: ${part}`);
+    }
+  }
+  
+  return normalized;
+}
+
+/**
+ * Sanitize file/folder names to prevent injection
+ * @param {string} name - The name to validate
+ * @returns {string} Sanitized name or throws error
+ */
+function sanitizeName(name) {
+  const sanitized = String(name || '').trim();
+  
+  if (!sanitized || sanitized === '.' || sanitized === '..') {
+    throw new Error('Invalid name');
+  }
+  
+  if (!/^[a-zA-Z0-9._-]+$/.test(sanitized)) {
+    throw new Error(`Invalid name characters: ${sanitized}`);
+  }
+  
+  return sanitized;
+}
+
+/**
+ * Convert file stat info to response metadata
+ */
+function _buildFileMetadata(statInfo) {
+  try {
+    return {
+      size: parseInt(statInfo.size || 0),
+      mode: String(statInfo.mode || '0644'),
+      mtime: statInfo.mtime || new Date().toISOString()
+    };
+  } catch {
+    return { size: 0, mode: '0644', mtime: new Date().toISOString() };
+  }
+}
+
+/**
+ * Parse Ansible find output to build file list
+ */
+async function parseFileList(host, relativePath) {
+  const playbookPath = path.resolve(__dirname, '../ansible/playbooks/files.yml');
+  const targetPath = `/etc/zabbix${relativePath ? '/' + relativePath : ''}`;
+  
+  const result = await runAnsiblePlaybook(playbookPath, host, {
+    file_operation: 'list',
+    file_target_path: targetPath
+  });
+  
+  if (!result.success) {
+    throw new Error(result.stderr || result.error || 'Failed to list files');
+  }
+  
+  // Parse ansible find output from result.stdout
+  const items = [];
+  try {
+    // Extract file list from Ansible output
+    const findOutput = result.stdout;
+    const lines = findOutput.split('\n');
+    
+    for (const line of lines) {
+      // Look for "ok: [hostname] =>" style output from Ansible find task
+      if (line.includes('"path"') || line.includes('"isdir"')) {
+        try {
+          // Extract JSON-like structure from Ansible verbose output
+          const match = line.match(/\{[^}]*"path"[^}]*\}/);
+          if (match) {
+            const fileInfo = JSON.parse(match[0]);
+            items.push({
+              name: path.basename(fileInfo.path),
+              relativePath: fileInfo.path.replace('/etc/zabbix/', '').replace('/etc/zabbix', ''),
+              type: fileInfo.isdir ? 'directory' : 'file',
+              size: fileInfo.size || 0,
+              mode: String(fileInfo.mode || '0644'),
+              mtime: fileInfo.mtime || new Date().toISOString()
+            });
+          }
+        } catch {
+          // Skip lines that don't parse
+        }
+      }
+    }
+  } catch (parseErr) {
+    logError('Error parsing file list:', parseErr);
+  }
+  
+  return items;
+}
+
+// ============= END REMOTE FILE MANAGER HELPERS =============
+
 /**
  * Remote file manager - list files and folders under /etc/zabbix
  */
 app.post('/api/remote-files/list', async (req, res) => {
-  // TODO: Implement remote file listing via Ansible modules/roles.
-  return res.status(501).json({
-    success: false,
-    error: 'Not Implemented',
-    details: 'Remote file manager is being migrated to Ansible. Use playbooks in ansible/playbooks/files.yml'
-  });
+  logInfo('[REMOTE-FILES-LIST] Endpoint HIT');
+  try {
+    const host = resolveTargetHost(req.body || {});
+    let relativePath = String(req.body?.relativePath || '').trim();
+    
+    // Validate relative path
+    relativePath = validateRelativePath(relativePath);
+    
+    const items = await parseFileList(host, relativePath);
+    const currentPath = relativePath;
+    
+    return res.json({
+      success: true,
+      currentPath,
+      items,
+      message: `Listed ${items.length} items in /etc/zabbix${currentPath ? '/' + currentPath : ''}`
+    });
+  } catch (error) {
+    logError('[REMOTE-FILES-LIST] Error:', error);
+    const status = error.message.includes('Invalid path') ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to list files',
+      details: error.message
+    });
+  }
 });
 
 /**
  * Remote file manager - read a text file under /etc/zabbix
  */
 app.post('/api/remote-files/read', async (req, res) => {
-  // TODO: Implement remote file read via Ansible (slurp/copy) and return content.
-  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote file read is being migrated to Ansible.' });
+  logInfo('[REMOTE-FILES-READ] Endpoint HIT');
+  try {
+    const host = resolveTargetHost(req.body || {});
+    let relativePath = String(req.body?.relativePath || '').trim();
+    
+    // Validate relative path
+    relativePath = validateRelativePath(relativePath);
+    
+    if (!relativePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid path',
+        details: 'Must specify a file path (not root directory)'
+      });
+    }
+    
+    const fullPath = `/etc/zabbix/${relativePath}`;
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/files.yml');
+    
+    const result = await runAnsiblePlaybook(playbookPath, host, {
+      file_operation: 'read',
+      file_target_path: fullPath
+    });
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to read file',
+        details: result.stderr || result.error
+      });
+    }
+    
+    // Extract file content from Ansible slurp output
+    let content = '';
+    try {
+      // Parse slurp base64 encoded content from Ansible output
+      const sourceMatch = result.stdout.match(/"content":\s*"([^"]+)"/);
+      if (sourceMatch) {
+        content = Buffer.from(sourceMatch[1], 'base64').toString('utf-8');
+      }
+    } catch (parseErr) {
+      logError('Error parsing file content:', parseErr);
+      content = result.stdout; // Fallback to raw output
+    }
+    
+    return res.json({
+      success: true,
+      relativePath,
+      content,
+      metadata: {
+        size: Buffer.byteLength(content, 'utf-8'),
+        mode: '0644',
+        mtime: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    logError('[REMOTE-FILES-READ] Error:', error);
+    const status = error.message.includes('Invalid path') ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to read file',
+      details: error.message
+    });
+  }
 });
 
 /**
  * Remote file manager - save file content under /etc/zabbix
  */
 app.post('/api/remote-files/write', async (req, res) => {
-  // TODO: Implement write via Ansible (copy/template) and proper mtime handling.
-  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote file write is being migrated to Ansible.' });
+  logInfo('[REMOTE-FILES-WRITE] Endpoint HIT');
+  try {
+    const host = resolveTargetHost(req.body || {});
+    let relativePath = String(req.body?.relativePath || '').trim();
+    const content = String(req.body?.content || '');
+    
+    // Validate relative path
+    relativePath = validateRelativePath(relativePath);
+    
+    if (!relativePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid path',
+        details: 'Must specify a file path (not root directory)'
+      });
+    }
+    
+    const fullPath = `/etc/zabbix/${relativePath}`;
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/files.yml');
+    
+    const result = await runAnsiblePlaybook(playbookPath, host, {
+      file_operation: 'write',
+      file_target_path: fullPath,
+      file_content_data: content,
+      file_create_mode: '0644'
+    });
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to write file',
+        details: result.stderr || result.error
+      });
+    }
+    
+    return res.json({
+      success: true,
+      relativePath,
+      metadata: {
+        size: Buffer.byteLength(content, 'utf-8'),
+        mode: '0644',
+        mtime: new Date().toISOString()
+      },
+      message: `File saved successfully at ${fullPath}`
+    });
+  } catch (error) {
+    logError('[REMOTE-FILES-WRITE] Error:', error);
+    const status = error.message.includes('Invalid path') ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to write file',
+      details: error.message
+    });
+  }
 });
 
 /**
  * Remote file manager - create a new file under /etc/zabbix
  */
 app.post('/api/remote-files/create', async (req, res) => {
-  // TODO: Implement create file via Ansible (copy/template tasks).
-  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote file create is being migrated to Ansible.' });
+  logInfo('[REMOTE-FILES-CREATE] Endpoint HIT');
+  try {
+    const host = resolveTargetHost(req.body || {});
+    let directoryPath = String(req.body?.directoryPath || '').trim();
+    const fileName = sanitizeName(req.body?.fileName);
+    const content = String(req.body?.content || '');
+    
+    // Validate directory path
+    directoryPath = validateRelativePath(directoryPath);
+    
+    const relativePath = directoryPath ? `${directoryPath}/${fileName}` : fileName;
+    const fullPath = `/etc/zabbix/${relativePath}`;
+    
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/files.yml');
+    
+    const result = await runAnsiblePlaybook(playbookPath, host, {
+      file_operation: 'create_file',
+      file_target_path: fullPath,
+      file_content_data: content,
+      file_create_mode: '0644'
+    });
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create file',
+        details: result.stderr || result.error
+      });
+    }
+    
+    return res.json({
+      success: true,
+      relativePath,
+      metadata: {
+        size: Buffer.byteLength(content, 'utf-8'),
+        mode: '0644',
+        mtime: new Date().toISOString()
+      },
+      message: `File created successfully at ${fullPath}`
+    });
+  } catch (error) {
+    logError('[REMOTE-FILES-CREATE] Error:', error);
+    const status = error.message.includes('Invalid') ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to create file',
+      details: error.message
+    });
+  }
 });
 
 /**
  * Remote file manager - create a new directory under /etc/zabbix
  */
 app.post('/api/remote-files/mkdir', async (req, res) => {
-  // TODO: Implement mkdir via Ansible (file module).
-  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Remote directory create is being migrated to Ansible.' });
+  logInfo('[REMOTE-FILES-MKDIR] Endpoint HIT');
+  try {
+    const host = resolveTargetHost(req.body || {});
+    let directoryPath = String(req.body?.directoryPath || '').trim();
+    const folderName = sanitizeName(req.body?.folderName);
+    
+    // Validate directory path
+    directoryPath = validateRelativePath(directoryPath);
+    
+    const relativePath = directoryPath ? `${directoryPath}/${folderName}` : folderName;
+    const fullPath = `/etc/zabbix/${relativePath}`;
+    
+    const playbookPath = path.resolve(__dirname, '../ansible/playbooks/files.yml');
+    
+    const result = await runAnsiblePlaybook(playbookPath, host, {
+      file_operation: 'mkdir',
+      file_target_path: fullPath
+    });
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create directory',
+        details: result.stderr || result.error
+      });
+    }
+    
+    return res.json({
+      success: true,
+      relativePath,
+      message: `Directory created successfully at ${fullPath}`
+    });
+  } catch (error) {
+    logError('[REMOTE-FILES-MKDIR] Error:', error);
+    const status = error.message.includes('Invalid') ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to create directory',
+      details: error.message
+    });
+  }
 });
 
 /**
  * Remote file manager - upload local files/folders to /etc/zabbix
  */
 app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => {
-  // TODO: Implement bulk upload via Ansible (copy/synchronize or looped copy tasks).
-  return res.status(501).json({ success: false, error: 'Not Implemented', details: 'Bulk upload is being migrated to Ansible.' });
+  logInfo('[REMOTE-FILES-UPLOAD] Endpoint HIT');
+  try {
+    const host = resolveTargetHost(req.body || {});
+    let directoryPath = String(req.body?.directoryPath || '').trim();
+    
+    // Validate directory path
+    directoryPath = validateRelativePath(directoryPath);
+    
+    const files = req.files || [];
+    if (!files || files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No files provided',
+        details: 'At least one file must be uploaded'
+      });
+    }
+    
+    const targetDir = directoryPath ? `/etc/zabbix/${directoryPath}` : '/etc/zabbix';
+    
+    // Stage files in temp directory and prepare for upload
+    const tempDir = path.join('/tmp', `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    await fs.mkdir(tempDir, { recursive: true }).catch(() => {});
+    
+    try {
+      // Write uploaded files to temp directory
+      const stagedFiles = [];
+      for (const file of files) {
+        const relativePaths = Array.isArray(req.body.relativePaths) 
+          ? req.body.relativePaths 
+          : [req.body.relativePaths || file.name];
+        
+        const fileName = relativePaths[stagedFiles.length] || file.name;
+        const filePath = path.join(tempDir, fileName);
+        
+        // Ensure directory exists
+        await fs.mkdir(path.dirname(filePath), { recursive: true }).catch(() => {});
+        
+        await fs.writeFile(filePath, file.buffer);
+        stagedFiles.push(filePath);
+      }
+      
+      // Use Ansible to sync staged files to target
+      const playbookPath = path.resolve(__dirname, '../ansible/playbooks/files.yml');
+      
+      const result = await runAnsiblePlaybook(playbookPath, host, {
+        file_operation: 'upload',
+        file_target_path: targetDir,
+        upload_files: stagedFiles
+      });
+      
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to upload files',
+          details: result.stderr || result.error
+        });
+      }
+      
+      return res.json({
+        success: true,
+        uploadedCount: files.length,
+        targetPath: targetDir,
+        message: `Uploaded ${files.length} file(s) to ${targetDir}`
+      });
+    } finally {
+      // Clean up temp directory
+      await executeShellCommand(`rm -rf "${tempDir}"`).catch(() => {});
+    }
+  } catch (error) {
+    logError('[REMOTE-FILES-UPLOAD] Error:', error);
+    const status = error.message.includes('Invalid path') ? 400 : 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to upload files',
+      details: error.message
+    });
+  }
 });
+
 
 /**
  * Stream installation progress logs via SSE (Server-Sent Events)

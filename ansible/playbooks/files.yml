@@ -1,0 +1,59 @@
+---
+- name: Remote File Manager
+  hosts: all
+  gather_facts: false
+  
+  vars:
+    operation: "{{ file_operation | default('list') }}"
+    target_path: "{{ file_target_path | default('/etc/zabbix') }}"
+    file_content: "{{ file_content_data | default('') }}"
+    create_mode: "{{ file_create_mode | default('0644') }}"
+    
+  tasks:
+    - name: List files in target directory
+      find:
+        paths: "{{ target_path }}"
+        depth: 1
+      register: file_list_result
+      when: operation == 'list'
+      
+    - name: Read file content
+      slurp:
+        src: "{{ target_path }}"
+      register: file_read_result
+      when: operation == 'read'
+      
+    - name: Write file content
+      copy:
+        content: "{{ file_content }}"
+        dest: "{{ target_path }}"
+        mode: "{{ create_mode }}"
+        backup: yes
+      register: file_write_result
+      when: operation == 'write'
+      
+    - name: Create file
+      copy:
+        content: "{{ file_content }}"
+        dest: "{{ target_path }}"
+        mode: "{{ create_mode }}"
+        force: no
+      register: file_create_result
+      when: operation == 'create_file'
+      
+    - name: Create directory
+      file:
+        path: "{{ target_path }}"
+        state: directory
+        mode: "0755"
+      register: dir_create_result
+      when: operation == 'mkdir'
+      
+    - name: Upload files to target
+      copy:
+        src: "{{ item }}"
+        dest: "{{ target_path }}/"
+        recursive: yes
+      register: file_upload_result
+      loop: "{{ upload_files | default([]) }}"
+      when: operation == 'upload'
