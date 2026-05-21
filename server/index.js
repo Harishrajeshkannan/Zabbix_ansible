@@ -1422,10 +1422,16 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
       });
       
       if (!result.success) {
+        const detailsText = truncateText(result.stderr || result.stdout || result.error || 'Ansible playbook failed');
         return res.status(500).json({
           success: false,
           error: 'Failed to upload files',
-          details: result.stderr || result.error
+          details: detailsText,
+          output: {
+            stdout: result.stdout || '',
+            stderr: result.stderr || '',
+            exitCode: result.exitCode || null
+          }
         });
       }
       
