@@ -1065,38 +1065,39 @@ async function parseFileList(host, relativePath) {
     throw new Error(result.stderr || result.error || 'Failed to list files');
   }
   
-  // Parse ansible find output from result.stdout
   const items = [];
   try {
-    // Extract file list from Ansible output
-    const findOutput = result.stdout;
-    const lines = findOutput.split('\n');
-    
-    for (const line of lines) {
-      // Look for "ok: [hostname] =>" style output from Ansible find task
-      if (line.includes('"path"') || line.includes('"isdir"')) {
-        try {
-          // Extract JSON-like structure from Ansible verbose output
-          const match = line.match(/\{[^}]*"path"[^}]*\}/);
-          if (match) {
-            const fileInfo = JSON.parse(match[0]);
-            items.push({
-              name: path.basename(fileInfo.path),
-              relativePath: fileInfo.path.replace('/etc/zabbix/', '').replace('/etc/zabbix', ''),
-              type: fileInfo.isdir ? 'directory' : 'file',
-              size: fileInfo.size || 0,
-              mode: String(fileInfo.mode || '0644'),
-              mtime: fileInfo.mtime || new Date().toISOString()
-            });
-          }
-        } catch {
-          // Skip lines that don't parse
-        }
+    const outputText = String(result.stdout || '');
+    const recordPattern = /([dbcfpls-])\|([^|]*)\|(\d+)\|([^|]*)\|(\d+)/g;
+    let match;
+
+    while ((match = recordPattern.exec(outputText)) !== null) {
+      const [, typeCode, relativeName, sizeText, mtimeText, modeText] = match;
+      const normalizedRelativeName = String(relativeName || '').replace(/^\/+/, '');
+
+      if (!normalizedRelativeName) {
+        continue;
       }
+
+      items.push({
+        name: path.basename(normalizedRelativeName),
+        relativePath: normalizedRelativeName,
+        type: typeCode === 'd' ? 'directory' : 'file',
+        size: Number.parseInt(sizeText || '0', 10) || 0,
+        mode: String(modeText || '0644'),
+        mtime: mtimeText || new Date().toISOString()
+      });
     }
   } catch (parseErr) {
     logError('Error parsing file list:', parseErr);
   }
+
+  items.sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === 'directory' ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
   
   return items;
 }

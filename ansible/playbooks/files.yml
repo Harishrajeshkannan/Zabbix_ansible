@@ -12,9 +12,8 @@
     
   tasks:
     - name: List files in target directory
-      find:
-        paths: "{{ target_path }}"
-        depth: 1
+      command: >
+        find "{{ target_path }}" -mindepth 1 -maxdepth 1 -printf '%y|%P|%s|%TY-%Tm-%TdT%TH:%TM:%TS|%m\n'
       register: file_list_result
       when: operation == 'list'
       
