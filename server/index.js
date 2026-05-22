@@ -1395,21 +1395,24 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
     await fs.mkdir(tempDir, { recursive: true }).catch(() => {});
     
     try {
-      // Write uploaded files to temp directory
+      // Write uploaded files to temp directory and preserve relative paths.
       const stagedFiles = [];
-      for (const file of files) {
-        const relativePaths = Array.isArray(req.body.relativePaths) 
-          ? req.body.relativePaths 
-          : [req.body.relativePaths || file.name];
-        
-        const fileName = relativePaths[stagedFiles.length] || file.name;
-        const filePath = path.join(tempDir, fileName);
-        
-        // Ensure directory exists
+      const relativePaths = Array.isArray(req.body.relativePaths)
+        ? req.body.relativePaths
+        : (req.body.relativePaths ? [req.body.relativePaths] : []);
+
+      for (const [index, file] of files.entries()) {
+        const providedRelativePath = relativePaths[index] || file.name;
+        const normalizedRelativePath = String(providedRelativePath).replace(/^\/+/, '');
+        const filePath = path.join(tempDir, normalizedRelativePath);
+
         await fs.mkdir(path.dirname(filePath), { recursive: true }).catch(() => {});
-        
         await fs.writeFile(filePath, file.buffer);
-        stagedFiles.push(filePath);
+
+        stagedFiles.push({
+          src: filePath,
+          relativePath: normalizedRelativePath
+        });
       }
       
       // Use Ansible to sync staged files to target

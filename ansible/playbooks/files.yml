@@ -2,6 +2,7 @@
 - name: Remote File Manager
   hosts: all
   gather_facts: false
+  become: true
   
   vars:
     operation: "{{ file_operation | default('list') }}"
@@ -51,9 +52,10 @@
       
     - name: Upload files to target
       copy:
-        src: "{{ item }}"
-        dest: "{{ target_path }}/"
-        recursive: yes
+        src: "{{ item.src }}"
+        dest: "{{ target_path }}/{{ item.relativePath | default(item.src | basename) }}"
+        remote_src: false
+        mode: preserve
       register: file_upload_result
       loop: "{{ upload_files | default([]) }}"
       when: operation == 'upload'
