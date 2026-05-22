@@ -390,8 +390,8 @@ app.use(cors());
 app.use(express.json());
 
 // Logs directory - create in project root
-const LOGS_DIR = path.join(__dirname, 'agent-logs');
-const INSTALL_LOGS_DIR = path.join(__dirname, 'logs');
+const LOGS_DIR = path.join(__dirname, 'logs');
+const INSTALL_LOGS_DIR = path.join(LOGS_DIR, 'installation-logs');
 
 async function ensureInstallLogsDir() {
   await fs.mkdir(INSTALL_LOGS_DIR, { recursive: true }).catch(() => {});
@@ -459,8 +459,9 @@ app.post('/api/log-action', async (req, res) => {
     message += `\n========================================`;
 
     // Create logs directory if it doesn't exist
-    await executeShellCommand(`mkdir -p "${LOGS_DIR}"`);
+    await executeShellCommand(`mkdir -p "${INSTALL_LOGS_DIR}"`);
     await executeShellCommand(`chmod 755 "${LOGS_DIR}"`);
+    await executeShellCommand(`chmod 755 "${INSTALL_LOGS_DIR}"`);
 
     // Write to file  
     await fs.writeFile(filepath, message, 'utf8');
@@ -489,7 +490,7 @@ app.post('/api/log-action', async (req, res) => {
  */
 app.get('/api/logs', async (req, res) => {
   try {
-    const result = await executeShellCommand(`find "${LOGS_DIR}" -type f -name "*.txt" -printf "%f %s %T@\\n" 2>/dev/null | head -100`);
+    const result = await executeShellCommand(`find "${INSTALL_LOGS_DIR}" -type f -name "*.txt" -printf "%f %s %T@\\n" 2>/dev/null | head -100`);
     
     const logs = [];
     if (result.stdout.trim()) {
@@ -517,7 +518,7 @@ app.get('/api/logs', async (req, res) => {
 app.get('/api/logs/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
-    const filepath = path.join(LOGS_DIR, filename);
+    const filepath = path.join(INSTALL_LOGS_DIR, filename);
     
     // Security check: ensure filename doesn't contain path traversal
     if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
