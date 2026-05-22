@@ -15,6 +15,12 @@
       command: >
         find "{{ target_path }}" -mindepth 1 -maxdepth 1 -printf '%y|%P|%s|%TY-%Tm-%TdT%TH:%TM:%TS|%m\n'
       register: file_list_result
+      changed_when: false
+      when: operation == 'list'
+
+    - name: Show file list output
+      debug:
+        var: file_list_result.stdout_lines
       when: operation == 'list'
       
     - name: Read file content
