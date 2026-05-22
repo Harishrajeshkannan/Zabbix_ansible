@@ -1065,38 +1065,39 @@ async function parseFileList(host, relativePath) {
     throw new Error(result.stderr || result.error || 'Failed to list files');
   }
   
-  // Parse ansible find output from result.stdout
   const items = [];
   try {
-    // Extract file list from Ansible output
-    const findOutput = result.stdout;
-    const lines = findOutput.split('\n');
-    
-    for (const line of lines) {
-      // Look for "ok: [hostname] =>" style output from Ansible find task
-      if (line.includes('"path"') || line.includes('"isdir"')) {
-        try {
-          // Extract JSON-like structure from Ansible verbose output
-          const match = line.match(/\{[^}]*"path"[^}]*\}/);
-          if (match) {
-            const fileInfo = JSON.parse(match[0]);
-            items.push({
-              name: path.basename(fileInfo.path),
-              relativePath: fileInfo.path.replace('/etc/zabbix/', '').replace('/etc/zabbix', ''),
-              type: fileInfo.isdir ? 'directory' : 'file',
-              size: fileInfo.size || 0,
-              mode: String(fileInfo.mode || '0644'),
-              mtime: fileInfo.mtime || new Date().toISOString()
-            });
-          }
-        } catch {
-          // Skip lines that don't parse
-        }
+    const outputText = String(result.stdout || '');
+    const recordPattern = /([dbcfpls-])\|([^|]*)\|(\d+)\|([^|]*)\|(\d+)/g;
+    let match;
+
+    while ((match = recordPattern.exec(outputText)) !== null) {
+      const [, typeCode, relativeName, sizeText, mtimeText, modeText] = match;
+      const normalizedRelativeName = String(relativeName || '').replace(/^\/+/, '');
+
+      if (!normalizedRelativeName) {
+        continue;
       }
+
+      items.push({
+        name: path.basename(normalizedRelativeName),
+        relativePath: normalizedRelativeName,
+        type: typeCode === 'd' ? 'directory' : 'file',
+        size: Number.parseInt(sizeText || '0', 10) || 0,
+        mode: String(modeText || '0644'),
+        mtime: mtimeText || new Date().toISOString()
+      });
     }
   } catch (parseErr) {
     logError('Error parsing file list:', parseErr);
   }
+
+  items.sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === 'directory' ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
   
   return items;
 }
@@ -1395,21 +1396,24 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
     await fs.mkdir(tempDir, { recursive: true }).catch(() => {});
     
     try {
-      // Write uploaded files to temp directory
+      // Write uploaded files to temp directory and preserve relative paths.
       const stagedFiles = [];
-      for (const file of files) {
-        const relativePaths = Array.isArray(req.body.relativePaths) 
-          ? req.body.relativePaths 
-          : [req.body.relativePaths || file.name];
-        
-        const fileName = relativePaths[stagedFiles.length] || file.name;
-        const filePath = path.join(tempDir, fileName);
-        
-        // Ensure directory exists
+      const relativePaths = Array.isArray(req.body.relativePaths)
+        ? req.body.relativePaths
+        : (req.body.relativePaths ? [req.body.relativePaths] : []);
+
+      for (const [index, file] of files.entries()) {
+        const providedRelativePath = relativePaths[index] || file.name;
+        const normalizedRelativePath = String(providedRelativePath).replace(/^\/+/, '');
+        const filePath = path.join(tempDir, normalizedRelativePath);
+
         await fs.mkdir(path.dirname(filePath), { recursive: true }).catch(() => {});
-        
         await fs.writeFile(filePath, file.buffer);
-        stagedFiles.push(filePath);
+
+        stagedFiles.push({
+          src: filePath,
+          relativePath: normalizedRelativePath
+        });
       }
       
       // Use Ansible to sync staged files to target
@@ -1422,10 +1426,16 @@ app.post('/api/remote-files/upload', upload.array('files'), async (req, res) => 
       });
       
       if (!result.success) {
+        const detailsText = truncateText(result.stderr || result.stdout || result.error || 'Ansible playbook failed');
         return res.status(500).json({
           success: false,
           error: 'Failed to upload files',
-          details: result.stderr || result.error
+          details: detailsText,
+          output: {
+            stdout: result.stdout || '',
+            stderr: result.stderr || '',
+            exitCode: result.exitCode || null
+          }
         });
       }
       

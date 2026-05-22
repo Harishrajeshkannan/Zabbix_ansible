@@ -2,6 +2,7 @@
 - name: Remote File Manager
   hosts: all
   gather_facts: false
+  become: true
   
   vars:
     operation: "{{ file_operation | default('list') }}"
@@ -11,10 +12,15 @@
     
   tasks:
     - name: List files in target directory
-      find:
-        paths: "{{ target_path }}"
-        depth: 1
+      command: >
+        find "{{ target_path }}" -mindepth 1 -maxdepth 1 -printf '%y|%P|%s|%TY-%Tm-%TdT%TH:%TM:%TS|%m\n'
       register: file_list_result
+      changed_when: false
+      when: operation == 'list'
+
+    - name: Show file list output
+      debug:
+        var: file_list_result.stdout_lines
       when: operation == 'list'
       
     - name: Read file content
@@ -51,9 +57,10 @@
       
     - name: Upload files to target
       copy:
-        src: "{{ item }}"
-        dest: "{{ target_path }}/"
-        recursive: yes
+        src: "{{ item.src }}"
+        dest: "{{ target_path }}/{{ item.relativePath | default(item.src | basename) }}"
+        remote_src: false
+        mode: preserve
       register: file_upload_result
       loop: "{{ upload_files | default([]) }}"
       when: operation == 'upload'
