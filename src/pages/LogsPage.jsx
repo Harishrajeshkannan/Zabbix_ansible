@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { FileText, RefreshCw, Check, X, Eye, XCircle, Server, Calendar, Filter, Search, ArrowUpDown } from 'lucide-react';
+import { resolveBackendApiUrl } from '../services/apiBase';
 import './LogsPage.css';
+
+const BACKEND_API_URL = resolveBackendApiUrl();
 
 const LogsPage = () => {
   const [logs, setLogs] = useState([]);
@@ -21,7 +24,7 @@ const LogsPage = () => {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/logs');
+      const response = await fetch(`${BACKEND_API_URL}/logs`);
       const data = await response.json();
       
       // Parse log filenames to extract info
@@ -49,7 +52,7 @@ const LogsPage = () => {
         // Fetch log content to extract version
         let version = 'N/A';
         try {
-          const contentResponse = await fetch(`http://localhost:3001/api/logs/${log.Name}`);
+          const contentResponse = await fetch(`${BACKEND_API_URL}/logs/${encodeURIComponent(log.Name)}`);
           const contentData = await contentResponse.json();
           if (contentData.success) {
             // Extract version from log content
@@ -97,7 +100,7 @@ const LogsPage = () => {
 
   const viewLogContent = async (logName) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/logs/${logName}`);
+      const response = await fetch(`${BACKEND_API_URL}/logs/${encodeURIComponent(logName)}`);
       const data = await response.json();
       
       if (data.success) {
