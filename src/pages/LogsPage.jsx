@@ -49,12 +49,18 @@ const LogsPage = () => {
           status = parts[2] || 'unknown';
         }
         
-        // Fetch log content to extract version
+        // Fetch log content to extract status and version
         let version = 'N/A';
+        status = 'unknown';
         try {
           const contentResponse = await fetch(`${BACKEND_API_URL}/logs/${encodeURIComponent(log.Name)}`);
           const contentData = await contentResponse.json();
           if (contentData.success) {
+            const statusMatch = contentData.content.match(/Status:\s*(SUCCESS|FAILED)/i);
+            if (statusMatch) {
+              status = statusMatch[1].toLowerCase();
+            }
+
             // Extract version from log content
             const versionMatch = contentData.content.match(/Version: ([\d.]+)/);
             if (versionMatch) {
